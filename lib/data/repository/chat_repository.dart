@@ -1,0 +1,179 @@
+import 'dart:math';
+
+import '../../core/constants/app_constants.dart';
+import '../../core/network/api_exception.dart';
+import '../local/storage_service.dart';
+import '../models/chat_channel.dart';
+import '../models/message.dart';
+import '../models/message_status.dart';
+import '../models/user.dart';
+import 'chat_remote_data_source.dart';
+
+class ChatRepository {
+  final ChatRemoteDataSource _remoteDataSource;
+  final StorageService _storageService;
+  final _random = Random();
+
+  ChatRepository(this._remoteDataSource, this._storageService);
+
+  Future<List<ChatChannel>> getChats() async {
+    try {
+      final localChats = _storageService.getChats();
+      if (localChats.isNotEmpty) return localChats;
+
+      final remoteChats = await _remoteDataSource.fetchChats();
+      _storageService.saveChats(remoteChats);
+      return remoteChats;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<Message>> getMessages(String channelId) async {
+    try {
+      final localMessages = _storageService.getMessagesForChannel(channelId);
+      if (localMessages.isNotEmpty) return localMessages;
+
+      final remoteMessages = await _remoteDataSource.fetchMessages(channelId);
+      final allMessages = _storageService.getMessages();
+      allMessages.addAll(remoteMessages);
+      _storageService.saveMessages(allMessages);
+      return remoteMessages;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<Message> sendMessage(String channelId, String text) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: text,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, text);
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Message generateAutoReply(String channelId) {
+    final reply = AppConstants.autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
+    final message = Message(
+      id: 'msg_${DateTime.now().millisecondsSinceEpoch}_reply',
+      channelId: channelId,
+      senderId: channelId,
+      text: reply,
+      timestamp: DateTime.now(),
+      status: MessageStatus.seen,
+    );
+    _persistMessage(message);
+    _updateChannelLastMessage(channelId, reply);
+    return message;
+  }
+
+  void _persistMessage(Message message) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == message.id);
+    if (idx >= 0) {
+      allMessages[idx] = message;
+    } else {
+      allMessages.add(message);
+    }
+    _storageService.saveMessages(allMessages);
+  }
+
+  void updateMessageStatus(String messageId, MessageStatus status) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == messageId);
+    if (idx >= 0) {
+      allMessages[idx] = allMessages[idx].copyWith(status: status);
+      _storageService.saveMessages(allMessages);
+    }
+  }
+
+  void _updateChannelLastMessage(String channelId, String text) {
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == channelId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(
+        lastMessage: text,
+        lastMessageTime: DateTime.now(),
+      );
+      _storageService.saveChats(chats);
+    }
+  }
+
+  void clearUnread(String channelId) {
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == channelId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(unreadCount: 0);
+      _storageService.saveChats(chats);
+    }
+  }
+
+  void incrementUnread(String channelId) {
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == channelId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(unreadCount: chats[idx].unreadCount + 1);
+      _storageService.saveChats(chats);
+    }
+  }
+
+  void deleteChat(String channelId) {
+    final chats = _storageService.getChats();
+    chats.removeWhere((c) => c.id == channelId);
+    _storageService.saveChats(chats);
+
+    final messages = _storageService.getMessages();
+    messages.removeWhere((m) => m.channelId == channelId);
+    _storageService.saveMessages(messages);
+  }
+
+  ChatChannel createChat(User contact) {
+    final chats = _storageService.getChats();
+    final existing = chats.where((c) => c.id == 'channel_${contact.id}');
+    if (existing.isNotEmpty) return existing.first;
+
+    final channel = ChatChannel(
+      id: 'channel_${contact.id}',
+      name: contact.name,
+      avatarUrl: contact.avatarUrl,
+      lastMessageTime: DateTime.now(),
+    );
+    chats.insert(0, channel);
+    _storageService.saveChats(chats);
+    return channel;
+  }
+
+  Future<List<User>> getContacts() async {
+    try {
+      return await _remoteDataSource.fetchContacts();
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  ChatChannel? getChannel(String channelId) {
+    final chats = _storageService.getChats();
+    final matches = chats.where((c) => c.id == channelId);
+    return matches.isNotEmpty ? matches.first : null;
+  }
+}
