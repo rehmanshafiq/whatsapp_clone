@@ -2,6 +2,7 @@ import 'package:dio/dio.dart';
 import 'package:get_it/get_it.dart';
 import 'package:get_storage/get_storage.dart';
 
+import '../../data/local/audio_playback_service.dart';
 import '../../data/local/storage_service.dart';
 import '../../data/repository/chat_remote_data_source.dart';
 import '../../data/repository/chat_repository.dart';
@@ -21,6 +22,7 @@ void setupLocator() {
   getIt.registerLazySingleton<ChatRepository>(
     () => ChatRepository(getIt<ChatRemoteDataSource>(), getIt<StorageService>()),
   );
+  getIt.registerLazySingleton<AudioPlaybackService>(() => AudioPlaybackService());
   getIt.registerFactory<ChatCubit>(() => ChatCubit(getIt<ChatRepository>()));
   getIt.registerFactory<ContactCubit>(() => ContactCubit(getIt<ChatRepository>()));
 }

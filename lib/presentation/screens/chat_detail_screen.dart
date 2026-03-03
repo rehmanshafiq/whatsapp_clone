@@ -184,6 +184,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ChatInputBar(
                       onSend: (text) =>
                           cubit.sendMessage(widget.channelId, text),
+                      onSendAudio: (file, duration) =>
+                          cubit.sendAudioMessage(
+                            widget.channelId,
+                            file.path,
+                            duration,
+                          ),
                     ),
                   ],
                 ),

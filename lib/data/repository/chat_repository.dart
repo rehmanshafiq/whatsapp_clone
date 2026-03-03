@@ -9,6 +9,8 @@ import '../models/message_status.dart';
 import '../models/user.dart';
 import 'chat_remote_data_source.dart';
 
+export '../models/message.dart' show MessageType;
+
 class ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
   final StorageService _storageService;
@@ -62,6 +64,35 @@ class ChatRepository {
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
       _updateChannelLastMessage(channelId, text);
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<Message> sendAudioMessage(
+    String channelId,
+    String audioPath,
+    Duration audioDuration,
+  ) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_audio',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: '',
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.audio,
+        audioPath: audioPath,
+        audioDuration: audioDuration,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, '\u{1F3A4} Voice message');
       return message;
     } on ApiException {
       rethrow;

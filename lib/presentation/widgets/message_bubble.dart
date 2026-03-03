@@ -2,12 +2,27 @@ import 'package:flutter/material.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
+import 'audio_message_bubble.dart';
 import 'message_status_icon.dart';
 
 class MessageBubble extends StatelessWidget {
   final Message message;
 
   const MessageBubble({super.key, required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    if (message.isAudio) {
+      return AudioMessageBubble(message: message);
+    }
+    return _TextMessageBubble(message: message);
+  }
+}
+
+class _TextMessageBubble extends StatelessWidget {
+  final Message message;
+
+  const _TextMessageBubble({required this.message});
 
   @override
   Widget build(BuildContext context) {
