@@ -42,6 +42,9 @@ class AudioPlaybackService {
         _currentlyPlayingId = null;
         _playingIdController.add(null);
         _safeCall(() => _player.setPlaybackRate(1.0));
+      } else if (_currentlyPlayingId != null &&
+          (state == PlayerState.playing || state == PlayerState.paused)) {
+        _playingIdController.add(_currentlyPlayingId);
       }
     });
     _errorSub = _player.onLog.listen((msg) {
