@@ -25,6 +25,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   bool _isPlaying = false;
   Duration _position = Duration.zero;
   Duration _totalDuration = Duration.zero;
+  double _playbackSpeed = 1.0;
+  bool _isSeeking = false;
 
   late final StreamSubscription<String?> _playingIdSub;
   late final StreamSubscription<Duration> _positionSub;
@@ -33,6 +35,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
   bool get _isThisMessage =>
       _playbackService.currentlyPlayingId == widget.message.id;
+
+  static const _speeds = [1.0, 1.5, 2.0];
 
   @override
   void initState() {
@@ -46,13 +50,18 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       if (playing != _isPlaying) {
         setState(() => _isPlaying = playing);
       }
-      if (id != widget.message.id && _position != Duration.zero) {
-        setState(() => _position = Duration.zero);
+      if (id != widget.message.id) {
+        if (_position != Duration.zero || _playbackSpeed != 1.0) {
+          setState(() {
+            _position = Duration.zero;
+            _playbackSpeed = 1.0;
+          });
+        }
       }
     });
 
     _positionSub = _playbackService.positionStream.listen((pos) {
-      if (!mounted || !_isThisMessage) return;
+      if (!mounted || !_isThisMessage || _isSeeking) return;
       setState(() => _position = pos);
     });
 
@@ -68,6 +77,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
       setState(() {
         _isPlaying = false;
         _position = Duration.zero;
+        _playbackSpeed = 1.0;
       });
     });
   }
@@ -85,6 +95,47 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     final path = widget.message.audioPath;
     if (path == null || !File(path).existsSync()) return;
     _playbackService.play(widget.message.id, path);
+  }
+
+  void _cycleSpeed() {
+    final currentIndex = _speeds.indexOf(_playbackSpeed);
+    final nextIndex = (currentIndex + 1) % _speeds.length;
+    final newSpeed = _speeds[nextIndex];
+    setState(() => _playbackSpeed = newSpeed);
+    if (_isThisMessage) {
+      _playbackService.setPlaybackRate(newSpeed);
+    }
+  }
+
+  void _onDragStart() {
+    if (!_isThisMessage) return;
+    _isSeeking = true;
+  }
+
+  void _onDragUpdate(double fraction) {
+    if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
+    final clamped = fraction.clamp(0.0, 1.0);
+    setState(() {
+      _position = Duration(
+        milliseconds: (clamped * _totalDuration.inMilliseconds).round(),
+      );
+    });
+  }
+
+  void _onDragEnd() {
+    if (!_isThisMessage) return;
+    _isSeeking = false;
+    _playbackService.seek(_position);
+  }
+
+  void _onTapSeek(double fraction) {
+    if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
+    final clamped = fraction.clamp(0.0, 1.0);
+    final seekPos = Duration(
+      milliseconds: (clamped * _totalDuration.inMilliseconds).round(),
+    );
+    setState(() => _position = seekPos);
+    _playbackService.seek(seekPos);
   }
 
   String _formatDuration(Duration d) {
@@ -145,20 +196,40 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  _WaveformBar(progress: progress, isOutgoing: isOutgoing),
+                  _SeekableWaveformBar(
+                    progress: progress,
+                    isOutgoing: isOutgoing,
+                    onTapSeek: _onTapSeek,
+                    onDragStart: _onDragStart,
+                    onDragUpdate: _onDragUpdate,
+                    onDragEnd: _onDragEnd,
+                  ),
                   const SizedBox(height: 4),
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      Text(
-                        _isPlaying || _isThisMessage
-                            ? _formatDuration(_position)
-                            : _formatDuration(_totalDuration),
-                        style: TextStyle(
-                          color:
-                              AppColors.textSecondary.withValues(alpha: 0.8),
-                          fontSize: 11,
-                        ),
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            _isPlaying || _isThisMessage
+                                ? _formatDuration(_position)
+                                : _formatDuration(_totalDuration),
+                            style: TextStyle(
+                              color: AppColors.textSecondary
+                                  .withValues(alpha: 0.8),
+                              fontSize: 11,
+                            ),
+                          ),
+                          if (_isThisMessage) ...[
+                            const SizedBox(width: 6),
+                            _SpeedButton(
+                              speed: _playbackSpeed,
+                              onTap: _cycleSpeed,
+                              isOutgoing: isOutgoing,
+                            ),
+                          ],
+                        ],
                       ),
                       Row(
                         mainAxisSize: MainAxisSize.min,
@@ -214,33 +285,103 @@ class _PlayPauseButton extends StatelessWidget {
               : AppColors.divider,
           shape: BoxShape.circle,
         ),
-        child: Icon(
-          isPlaying ? Icons.pause : Icons.play_arrow,
-          color: AppColors.textPrimary,
-          size: 24,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 200),
+          child: Icon(
+            isPlaying ? Icons.pause : Icons.play_arrow,
+            key: ValueKey(isPlaying),
+            color: AppColors.textPrimary,
+            size: 24,
+          ),
         ),
       ),
     );
   }
 }
 
-class _WaveformBar extends StatelessWidget {
-  final double progress;
+class _SpeedButton extends StatelessWidget {
+  final double speed;
+  final VoidCallback onTap;
   final bool isOutgoing;
 
-  const _WaveformBar({required this.progress, required this.isOutgoing});
+  const _SpeedButton({
+    required this.speed,
+    required this.onTap,
+    required this.isOutgoing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final label = speed == 1.5 ? '1.5x' : '${speed.toInt()}x';
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: isOutgoing
+              ? AppColors.accent.withValues(alpha: 0.25)
+              : AppColors.divider.withValues(alpha: 0.8),
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SeekableWaveformBar extends StatelessWidget {
+  final double progress;
+  final bool isOutgoing;
+  final ValueChanged<double> onTapSeek;
+  final VoidCallback onDragStart;
+  final ValueChanged<double> onDragUpdate;
+  final VoidCallback onDragEnd;
+
+  const _SeekableWaveformBar({
+    required this.progress,
+    required this.isOutgoing,
+    required this.onTapSeek,
+    required this.onDragStart,
+    required this.onDragUpdate,
+    required this.onDragEnd,
+  });
 
   @override
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        return CustomPaint(
-          size: Size(constraints.maxWidth, 28),
-          painter: _WaveformPainter(
-            progress: progress,
-            activeColor:
-                isOutgoing ? AppColors.textPrimary : AppColors.accent,
-            inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
+        double fractionFromX(double dx) =>
+            (dx / constraints.maxWidth).clamp(0.0, 1.0);
+
+        return GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTapUp: (details) {
+            onTapSeek(fractionFromX(details.localPosition.dx));
+          },
+          onHorizontalDragStart: (details) {
+            onDragStart();
+            onDragUpdate(fractionFromX(details.localPosition.dx));
+          },
+          onHorizontalDragUpdate: (details) {
+            onDragUpdate(fractionFromX(details.localPosition.dx));
+          },
+          onHorizontalDragEnd: (_) => onDragEnd(),
+          child: CustomPaint(
+            size: Size(constraints.maxWidth, 28),
+            painter: _WaveformPainter(
+              progress: progress,
+              activeColor:
+                  isOutgoing ? AppColors.textPrimary : AppColors.accent,
+              inactiveColor:
+                  AppColors.textSecondary.withValues(alpha: 0.3),
+            ),
           ),
         );
       },
@@ -290,6 +431,14 @@ class _WaveformPainter extends CustomPainter {
           const Radius.circular(1.5),
         ),
         paint,
+      );
+    }
+
+    if (progress > 0 && progress < 1) {
+      canvas.drawCircle(
+        Offset(progressX.clamp(0, size.width), size.height / 2),
+        3.5,
+        Paint()..color = activeColor,
       );
     }
   }

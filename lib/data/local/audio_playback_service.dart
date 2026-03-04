@@ -41,6 +41,7 @@ class AudioPlaybackService {
         _completionController.add(null);
         _currentlyPlayingId = null;
         _playingIdController.add(null);
+        _safeCall(() => _player.setPlaybackRate(1.0));
       }
     });
     _errorSub = _player.onLog.listen((msg) {
@@ -68,10 +69,12 @@ class AudioPlaybackService {
       final state = _player.state;
       if (state == PlayerState.playing) {
         await _safeCall(() => _player.pause());
+        _playingIdController.add(messageId);
         return;
       }
       if (state == PlayerState.paused) {
         await _safeCall(() => _player.resume());
+        _playingIdController.add(messageId);
         return;
       }
     }
@@ -108,6 +111,10 @@ class AudioPlaybackService {
 
   Future<void> seek(Duration position) async {
     await _safeCall(() => _player.seek(position));
+  }
+
+  Future<void> setPlaybackRate(double rate) async {
+    await _safeCall(() => _player.setPlaybackRate(rate));
   }
 
   PlayerState get state => _player.state;
