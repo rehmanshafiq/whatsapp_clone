@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/local/audio_playback_service.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/chat_avatar.dart';
@@ -32,6 +34,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
   @override
   void dispose() {
+    getIt<AudioPlaybackService>().stop();
     _scrollController.dispose();
     super.dispose();
   }
