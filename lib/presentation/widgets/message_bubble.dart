@@ -1,21 +1,123 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
+import '../cubit/chat_cubit.dart';
 import 'audio_message_bubble.dart';
+import 'emoji_reaction_overlay.dart';
 import 'message_status_icon.dart';
 
-class MessageBubble extends StatelessWidget {
+class MessageBubble extends StatefulWidget {
   final Message message;
 
   const MessageBubble({super.key, required this.message});
 
   @override
+  State<MessageBubble> createState() => _MessageBubbleState();
+}
+
+class _MessageBubbleState extends State<MessageBubble> {
+  Future<void> _showReactions() async {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null) return;
+    final topLeft = box.localToGlobal(Offset.zero);
+    final size = box.size;
+    final messageRect = topLeft & size;
+
+    if (!mounted) return;
+    final result = await showReactionPicker(
+      context: context,
+      messageRect: messageRect,
+      isOutgoing: widget.message.isOutgoing,
+    );
+
+    if (!mounted) return;
+    await handleReactionResult(
+      context: context,
+      result: result,
+      onReact: (emoji) {
+        context.read<ChatCubit>().reactToMessage(widget.message.id, emoji);
+      },
+    );
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (message.isAudio) {
-      return AudioMessageBubble(message: message);
-    }
-    return _TextMessageBubble(message: message);
+    final hasReactions = widget.message.reactions.isNotEmpty;
+    final child = widget.message.isAudio
+        ? AudioMessageBubble(message: widget.message)
+        : _TextMessageBubble(message: widget.message);
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: hasReactions ? 12 : 0),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          GestureDetector(
+            onLongPress: _showReactions,
+            child: child,
+          ),
+          if (hasReactions)
+            Positioned(
+              bottom: -10,
+              right: widget.message.isOutgoing ? 20 : null,
+              left: widget.message.isOutgoing ? null : 20,
+              child: _ReactionBadge(reactions: widget.message.reactions),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReactionBadge extends StatelessWidget {
+  final Map<String, List<String>> reactions;
+
+  const _ReactionBadge({required this.reactions});
+
+  @override
+  Widget build(BuildContext context) {
+    final totalCount =
+        reactions.values.fold<int>(0, (sum, list) => sum + list.length);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: AppColors.appBar,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: AppColors.chatBackground,
+          width: 1.5,
+        ),
+        boxShadow: const [
+          BoxShadow(
+            color: Colors.black12,
+            blurRadius: 4,
+            offset: Offset(0, 1),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...reactions.keys.map(
+            (emoji) => Text(emoji, style: const TextStyle(fontSize: 14)),
+          ),
+          if (totalCount > 1) ...[
+            const SizedBox(width: 2),
+            Text(
+              '$totalCount',
+              style: const TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 11,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
   }
 }
 

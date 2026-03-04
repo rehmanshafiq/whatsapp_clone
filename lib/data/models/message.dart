@@ -14,6 +14,7 @@ class Message extends Equatable {
   final MessageType type;
   final String? audioPath;
   final Duration? audioDuration;
+  final Map<String, List<String>> reactions;
 
   const Message({
     required this.id,
@@ -25,6 +26,7 @@ class Message extends Equatable {
     this.type = MessageType.text,
     this.audioPath,
     this.audioDuration,
+    this.reactions = const {},
   });
 
   Message copyWith({
@@ -37,6 +39,7 @@ class Message extends Equatable {
     MessageType? type,
     String? audioPath,
     Duration? audioDuration,
+    Map<String, List<String>>? reactions,
   }) {
     return Message(
       id: id ?? this.id,
@@ -48,6 +51,7 @@ class Message extends Equatable {
       type: type ?? this.type,
       audioPath: audioPath ?? this.audioPath,
       audioDuration: audioDuration ?? this.audioDuration,
+      reactions: reactions ?? this.reactions,
     );
   }
 
@@ -61,6 +65,7 @@ class Message extends Equatable {
         'type': type.index,
         'audioPath': audioPath,
         'audioDuration': audioDuration?.inMilliseconds,
+        'reactions': reactions.map((k, v) => MapEntry(k, v)),
       };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -77,6 +82,10 @@ class Message extends Equatable {
         audioDuration: json['audioDuration'] != null
             ? Duration(milliseconds: json['audioDuration'] as int)
             : null,
+        reactions: (json['reactions'] as Map<String, dynamic>?)?.map(
+              (k, v) => MapEntry(k, List<String>.from(v as List)),
+            ) ??
+            const {},
       );
 
   bool get isOutgoing => senderId == 'me';
@@ -93,5 +102,6 @@ class Message extends Equatable {
         type,
         audioPath,
         audioDuration,
+        reactions,
       ];
 }

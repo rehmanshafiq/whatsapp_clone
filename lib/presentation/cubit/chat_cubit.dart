@@ -181,6 +181,31 @@ class ChatCubit extends Cubit<ChatState> {
     } catch (_) {}
   }
 
+  void reactToMessage(String messageId, String emoji) {
+    final updatedMessages = state.messages.map((m) {
+      if (m.id != messageId) return m;
+      final reactions = Map<String, List<String>>.from(
+        m.reactions.map((k, v) => MapEntry(k, List<String>.from(v))),
+      );
+      final users = reactions[emoji] ?? [];
+      if (users.contains(AppConstants.currentUserId)) {
+        users.remove(AppConstants.currentUserId);
+        if (users.isEmpty) {
+          reactions.remove(emoji);
+        } else {
+          reactions[emoji] = users;
+        }
+      } else {
+        reactions[emoji] = [...users, AppConstants.currentUserId];
+      }
+      return m.copyWith(reactions: reactions);
+    }).toList();
+    emit(state.copyWith(messages: updatedMessages));
+
+    final msg = updatedMessages.firstWhere((m) => m.id == messageId);
+    _repository.updateMessageReactions(messageId, msg.reactions);
+  }
+
   void updateSearchQuery(String query) {
     emit(state.copyWith(searchQuery: query));
   }

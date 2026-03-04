@@ -136,6 +136,16 @@ class ChatRepository {
     }
   }
 
+  void updateMessageReactions(
+      String messageId, Map<String, List<String>> reactions) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == messageId);
+    if (idx >= 0) {
+      allMessages[idx] = allMessages[idx].copyWith(reactions: reactions);
+      _storageService.saveMessages(allMessages);
+    }
+  }
+
   void _updateChannelLastMessage(String channelId, String text) {
     final chats = _storageService.getChats();
     final idx = chats.indexWhere((c) => c.id == channelId);
