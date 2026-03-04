@@ -63,28 +63,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 color: AppColors.iconMuted),
             onPressed: () => _toggleSearch(cubit),
           ),
-          if (!_isSearching)
-            PopupMenuButton<String>(
-              icon: const Icon(Icons.more_vert, color: AppColors.iconMuted),
-              color: AppColors.appBar,
-              itemBuilder: (_) => const [
-                PopupMenuItem(
-                  value: 'new_group',
-                  child: Text('New group',
-                      style: TextStyle(color: AppColors.textPrimary)),
-                ),
-                PopupMenuItem(
-                  value: 'starred',
-                  child: Text('Starred messages',
-                      style: TextStyle(color: AppColors.textPrimary)),
-                ),
-                PopupMenuItem(
-                  value: 'settings',
-                  child: Text('Settings',
-                      style: TextStyle(color: AppColors.textPrimary)),
-                ),
-              ],
-            ),
+
         ],
       ),
       body: BlocBuilder<ChatCubit, ChatState>(

@@ -119,37 +119,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   icon: const Icon(Icons.call, color: AppColors.iconMuted),
                   onPressed: () {},
                 ),
-                PopupMenuButton<String>(
-                  icon: const Icon(Icons.more_vert, color: AppColors.iconMuted),
-                  color: AppColors.appBar,
-                  itemBuilder: (_) => const [
-                    PopupMenuItem(
-                      value: 'view_contact',
-                      child: Text('View contact',
-                          style: TextStyle(color: AppColors.textPrimary)),
-                    ),
-                    PopupMenuItem(
-                      value: 'media',
-                      child: Text('Media, links, and docs',
-                          style: TextStyle(color: AppColors.textPrimary)),
-                    ),
-                    PopupMenuItem(
-                      value: 'search',
-                      child: Text('Search',
-                          style: TextStyle(color: AppColors.textPrimary)),
-                    ),
-                    PopupMenuItem(
-                      value: 'mute',
-                      child: Text('Mute notifications',
-                          style: TextStyle(color: AppColors.textPrimary)),
-                    ),
-                    PopupMenuItem(
-                      value: 'wallpaper',
-                      child: Text('Wallpaper',
-                          style: TextStyle(color: AppColors.textPrimary)),
-                    ),
-                  ],
-                ),
+
               ],
             ),
             body: Stack(
