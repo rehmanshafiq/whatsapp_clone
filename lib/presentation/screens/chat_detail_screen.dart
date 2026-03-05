@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
+import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/chat_avatar.dart';
@@ -23,10 +26,15 @@ class ChatDetailScreen extends StatefulWidget {
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _scrollController = ScrollController();
+  late final ReactionsController _reactionsController;
+  bool _reactionsSynced = false;
 
   @override
   void initState() {
     super.initState();
+    _reactionsController = ReactionsController(
+      currentUserId: AppConstants.currentUserId,
+    );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatCubit>().loadMessages(widget.channelId);
     });
@@ -37,6 +45,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     getIt<AudioPlaybackService>().stop();
     _scrollController.dispose();
     super.dispose();
+  }
+
+  void _syncReactions(List<Message> messages) {
+    if (_reactionsSynced) return;
+    _reactionsSynced = true;
+    for (final message in messages) {
+      for (final entry in message.reactions.entries) {
+        for (final _ in entry.value) {
+          _reactionsController.addReaction(message.id, entry.key);
+        }
+      }
+    }
+    if (mounted) setState(() {});
   }
 
   void _scrollToBottom() {
@@ -55,10 +76,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   Widget build(BuildContext context) {
     return BlocConsumer<ChatCubit, ChatState>(
       listenWhen: (prev, curr) => prev.messages.length != curr.messages.length,
-      listener: (_, _) => _scrollToBottom(),
+      listener: (_, state) {
+        _scrollToBottom();
+        _syncReactions(state.messages);
+      },
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
+
+        // Sync reactions from persisted messages when we first have messages
+        // (covers initial load and re-entering the chat).
+        if (state.messages.isNotEmpty && !_reactionsSynced) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted) return;
+            _syncReactions(state.messages);
+          });
+        }
 
         return PopScope(
           onPopInvokedWithResult: (didPop, _) {
@@ -150,7 +183,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                   return const TypingIndicator();
                                 }
                                 return MessageBubble(
-                                    message: state.messages[index]);
+                                  message: state.messages[index],
+                                  reactionsController:
+                                      _reactionsController,
+                                  onReactionChanged: () =>
+                                      setState(() {}),
+                                );
                               },
                             ),
                     ),

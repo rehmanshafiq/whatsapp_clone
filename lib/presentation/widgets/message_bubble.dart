@@ -1,69 +1,66 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'audio_message_bubble.dart';
-import 'emoji_reaction_overlay.dart';
 import 'message_status_icon.dart';
 
-class MessageBubble extends StatefulWidget {
+class MessageBubble extends StatelessWidget {
   final Message message;
+  final ReactionsController reactionsController;
+  final VoidCallback? onReactionChanged;
 
-  const MessageBubble({super.key, required this.message});
-
-  @override
-  State<MessageBubble> createState() => _MessageBubbleState();
-}
-
-class _MessageBubbleState extends State<MessageBubble> {
-  Future<void> _showReactions() async {
-    final box = context.findRenderObject() as RenderBox?;
-    if (box == null) return;
-    final topLeft = box.localToGlobal(Offset.zero);
-    final size = box.size;
-    final messageRect = topLeft & size;
-
-    if (!mounted) return;
-    final result = await showReactionPicker(
-      context: context,
-      messageRect: messageRect,
-      isOutgoing: widget.message.isOutgoing,
-    );
-
-    if (!mounted) return;
-    await handleReactionResult(
-      context: context,
-      result: result,
-      onReact: (emoji) {
-        context.read<ChatCubit>().reactToMessage(widget.message.id, emoji);
-      },
-    );
-  }
+  const MessageBubble({
+    super.key,
+    required this.message,
+    required this.reactionsController,
+    this.onReactionChanged,
+  });
 
   @override
   Widget build(BuildContext context) {
-    final hasReactions = widget.message.reactions.isNotEmpty;
-    final child = widget.message.isAudio
-        ? AudioMessageBubble(message: widget.message)
-        : _TextMessageBubble(message: widget.message);
+    final bubble = message.isAudio
+        ? AudioMessageBubble(message: message)
+        : _TextMessageBubble(message: message);
 
-    return Padding(
-      padding: EdgeInsets.only(bottom: hasReactions ? 12 : 0),
-      child: Stack(
-        clipBehavior: Clip.none,
+    return ChatMessageWrapper(
+      messageId: message.id,
+      controller: reactionsController,
+      alignment:
+          message.isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      config: ChatReactionsConfig(
+        availableReactions: const ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
+        enableHapticFeedback: true,
+        showContextMenu: false,
+        dialogBackgroundColor: AppColors.appBar,
+      ),
+      onReactionAdded: (reaction) {
+        reactionsController.addReaction(message.id, reaction);
+        context.read<ChatCubit>().reactToMessage(message.id, reaction);
+        onReactionChanged?.call();
+      },
+      onReactionRemoved: (reaction) {
+        reactionsController.removeReaction(message.id, reaction);
+        context.read<ChatCubit>().reactToMessage(message.id, reaction);
+        onReactionChanged?.call();
+      },
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment:
+            message.isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
         children: [
-          GestureDetector(
-            onLongPress: _showReactions,
-            child: child,
-          ),
-          if (hasReactions)
-            Positioned(
-              bottom: -10,
-              right: widget.message.isOutgoing ? 20 : null,
-              left: widget.message.isOutgoing ? null : 20,
-              child: _ReactionBadge(reactions: widget.message.reactions),
+          bubble,
+          if (message.reactions.isNotEmpty)
+            Padding(
+              padding: EdgeInsets.only(
+                left: message.isOutgoing ? 64 : 8,
+                right: message.isOutgoing ? 8 : 64,
+                top: 2,
+              ),
+              child: _ReactionRow(reactions: message.reactions),
             ),
         ],
       ),
@@ -71,10 +68,12 @@ class _MessageBubbleState extends State<MessageBubble> {
   }
 }
 
-class _ReactionBadge extends StatelessWidget {
+/// Renders reaction emojis below the message bubble (WhatsApp-style).
+/// Uses [message.reactions] as single source of truth so UI updates when cubit emits.
+class _ReactionRow extends StatelessWidget {
   final Map<String, List<String>> reactions;
 
-  const _ReactionBadge({required this.reactions});
+  const _ReactionRow({required this.reactions});
 
   @override
   Widget build(BuildContext context) {
@@ -82,7 +81,7 @@ class _ReactionBadge extends StatelessWidget {
         reactions.values.fold<int>(0, (sum, list) => sum + list.length);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: AppColors.appBar,
         borderRadius: BorderRadius.circular(12),
@@ -102,15 +101,15 @@ class _ReactionBadge extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           ...reactions.keys.map(
-            (emoji) => Text(emoji, style: const TextStyle(fontSize: 14)),
+            (emoji) => Text(emoji, style: const TextStyle(fontSize: 16)),
           ),
           if (totalCount > 1) ...[
-            const SizedBox(width: 2),
+            const SizedBox(width: 4),
             Text(
               '$totalCount',
               style: const TextStyle(
                 color: AppColors.textSecondary,
-                fontSize: 11,
+                fontSize: 12,
                 fontWeight: FontWeight.w500,
               ),
             ),
