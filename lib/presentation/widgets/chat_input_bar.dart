@@ -1,11 +1,12 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart' as foundation;
+import 'package:emoji_picker_flutter/emoji_picker_flutter.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
-
 import '../../core/theme/app_theme.dart';
 
 class ChatInputBar extends StatefulWidget {
@@ -24,7 +25,10 @@ class ChatInputBar extends StatefulWidget {
 
 class _ChatInputBarState extends State<ChatInputBar> {
   final _controller = TextEditingController();
+  final _textFocusNode = FocusNode();
+
   bool _hasText = false;
+  bool _isEmojiVisible = false;
   String? _voiceNoteDir;
 
   @override
@@ -32,7 +36,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
     super.initState();
     _controller.addListener(() {
       final has = _controller.text.trim().isNotEmpty;
-      if (has != _hasText) setState(() => _hasText = has);
+      if (has != _hasText) {
+        setState(() => _hasText = has);
+      }
     });
     _initVoiceDir();
   }
@@ -60,6 +66,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
   @override
   void dispose() {
     _controller.dispose();
+    _textFocusNode.dispose();
     super.dispose();
   }
 
@@ -94,7 +101,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
     try {
       await source.copy(dest.path);
-      try { await source.delete(); } catch (_) {}
+      try {
+        await source.delete();
+      } catch (_) {}
       return dest;
     } catch (_) {
       return null;
@@ -104,7 +113,9 @@ class _ChatInputBarState extends State<ChatInputBar> {
   Future<void> _handleAudioSend(File soundFile, String time) async {
     final duration = _parseRecordingTime(time);
     if (duration.inSeconds < 1) {
-      try { soundFile.deleteSync(); } catch (_) {}
+      try {
+        soundFile.deleteSync();
+      } catch (_) {}
       return;
     }
 
@@ -117,13 +128,110 @@ class _ChatInputBarState extends State<ChatInputBar> {
     }
   }
 
+  void _toggleEmojiPicker() {
+    setState(() {
+      _isEmojiVisible = !_isEmojiVisible;
+    });
+
+    // Bonus behavior:
+    // - We DO NOT unfocus the TextField here.
+    // - That means if the keyboard is already open, it stays open.
+    // If you later want WhatsApp-like behavior (emoji replaces keyboard),
+    // you can add FocusScope.of(context).unfocus() when opening.
+  }
+
   @override
   Widget build(BuildContext context) {
     return SafeArea(
-      child: Container(
-        color: AppColors.scaffold,
-        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-        child: _hasText ? _buildTextMode() : _buildRecorderMode(),
+      top: false,
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Emoji picker panel
+          if (_isEmojiVisible)
+            SizedBox(
+              height: 280,
+              child: _buildEmojiPicker(),
+            ),
+
+          // Input bar
+          Container(
+            color: AppColors.scaffold,
+            padding:
+            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: _hasText ? _buildTextMode() : _buildRecorderMode(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildEmojiPicker() {
+    return EmojiPicker(
+      // This automatically inserts/deletes emoji at the current cursor
+      // position in the linked TextField:
+      textEditingController: _controller,
+
+      // Optional callbacks – you can hook analytics/metrics here.
+      onEmojiSelected: (category, emoji) {
+        // ...
+      },
+      onBackspacePressed: () {
+        // Backspace is also handled automatically for the controller.
+      },
+
+      config: Config(
+        height: 280,
+        checkPlatformCompatibility: true,
+        // Slightly larger on iOS to match native feel
+        emojiViewConfig: EmojiViewConfig(
+          columns: 8,
+          emojiSizeMax: 28 *
+              (foundation.defaultTargetPlatform ==
+                  TargetPlatform.iOS
+                  ? 1.20
+                  : 1.0),
+          backgroundColor: AppColors.chatBackground,
+          gridPadding:
+          const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          recentsLimit: 40,
+        ),
+        // Enable skin tones
+        skinToneConfig: const SkinToneConfig(
+          // enableSkinTones: true,
+        ),
+        // Category bar (top)
+        categoryViewConfig: CategoryViewConfig(
+          backgroundColor: AppColors.appBar,
+          indicatorColor: AppColors.accent,
+          iconColor: AppColors.iconMuted,
+          iconColorSelected: AppColors.accent,
+          backspaceColor: AppColors.accent,
+          initCategory: Category.RECENT,
+          recentTabBehavior: RecentTabBehavior.RECENT,
+        ),
+        // Bottom action bar (search + backspace)
+        bottomActionBarConfig: BottomActionBarConfig(
+          enabled: true,
+          showBackspaceButton: true,
+          showSearchViewButton: true,
+          backgroundColor: AppColors.appBar,
+          buttonColor: AppColors.accent,
+          buttonIconColor: AppColors.textPrimary,
+        ),
+        // Search bar
+        searchViewConfig: SearchViewConfig(
+          backgroundColor: AppColors.appBar,
+          // buttonColor: Colors.transparent,
+          buttonIconColor: AppColors.textSecondary,
+          hintText: 'Search emoji',
+        ),
+        // Layout order: top = categories, middle = emojis, bottom = search
+        viewOrderConfig: const ViewOrderConfig(
+          top: EmojiPickerItem.categoryBar,
+          middle: EmojiPickerItem.emojiView,
+          bottom: EmojiPickerItem.searchBar,
+        ),
       ),
     );
   }
@@ -214,15 +322,22 @@ class _ChatInputBarState extends State<ChatInputBar> {
       child: Row(
         children: [
           IconButton(
-            icon: const Icon(Icons.emoji_emotions_outlined,
-                color: AppColors.iconMuted),
-            onPressed: () {},
+            icon: Icon(
+              _isEmojiVisible
+                  ? Icons.keyboard
+                  : Icons.emoji_emotions_outlined,
+              color: AppColors.iconMuted,
+            ),
+            onPressed: _toggleEmojiPicker,
           ),
           Expanded(
             child: TextField(
               controller: _controller,
+              focusNode: _textFocusNode,
               style: const TextStyle(
-                  color: AppColors.textPrimary, fontSize: 16),
+                color: AppColors.textPrimary,
+                fontSize: 16,
+              ),
               decoration: const InputDecoration(
                 hintText: 'Message',
                 hintStyle: TextStyle(color: AppColors.textSecondary),
@@ -241,7 +356,8 @@ class _ChatInputBarState extends State<ChatInputBar> {
           ),
           if (showCamera)
             IconButton(
-              icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
+              icon: const Icon(Icons.camera_alt,
+                  color: AppColors.iconMuted),
               onPressed: () {},
             ),
         ],
