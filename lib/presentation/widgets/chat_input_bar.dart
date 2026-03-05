@@ -174,7 +174,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
       // Optional callbacks – you can hook analytics/metrics here.
       onEmojiSelected: (category, emoji) {
-        // ...
+        setState(() => _isEmojiVisible = false);
       },
       onBackspacePressed: () {
         // Backspace is also handled automatically for the controller.
