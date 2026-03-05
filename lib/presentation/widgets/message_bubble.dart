@@ -128,8 +128,10 @@ class _TextMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOutgoing = message.isOutgoing;
+    final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
+    final hourRaw = message.timestamp.hour % 12;
     final time =
-        '${message.timestamp.hour.toString().padLeft(2, '0')}:${message.timestamp.minute.toString().padLeft(2, '0')}';
+        '${hourRaw == 0 ? 12 : hourRaw}:${message.timestamp.minute.toString().padLeft(2, '0')} $period';
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,

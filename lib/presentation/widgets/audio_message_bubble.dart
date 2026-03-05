@@ -147,8 +147,10 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   @override
   Widget build(BuildContext context) {
     final isOutgoing = widget.message.isOutgoing;
+    final period = widget.message.timestamp.hour >= 12 ? 'PM' : 'AM';
+    final hourRaw = widget.message.timestamp.hour % 12;
     final time =
-        '${widget.message.timestamp.hour.toString().padLeft(2, '0')}:${widget.message.timestamp.minute.toString().padLeft(2, '0')}';
+        '${hourRaw == 0 ? 12 : hourRaw}:${widget.message.timestamp.minute.toString().padLeft(2, '0')} $period';
 
     final displayDuration =
         _isPlaying || _isThisMessage ? _position : Duration.zero;

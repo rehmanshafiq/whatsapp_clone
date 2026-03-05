@@ -24,9 +24,10 @@ class ChatListItem extends StatelessWidget {
     final diff = today.difference(msgDate).inDays;
 
     if (diff == 0) {
-      final h = time.hour.toString().padLeft(2, '0');
+      final period = time.hour >= 12 ? 'PM' : 'AM';
+      final h = time.hour % 12 == 0 ? 12 : time.hour % 12;
       final m = time.minute.toString().padLeft(2, '0');
-      return '$h:$m';
+      return '$h:$m $period';
     }
     if (diff == 1) return 'Yesterday';
     if (diff < 7) {
