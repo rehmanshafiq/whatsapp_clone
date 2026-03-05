@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 
@@ -37,6 +38,15 @@ class _ChatInputBarState extends State<ChatInputBar> {
   }
 
   Future<void> _initVoiceDir() async {
+    try {
+      if (!await Permission.microphone.isGranted) {
+        await Permission.microphone.request();
+      }
+    } catch (_) {
+      // permission_handler can throw during hot restart if a native-side
+      // request is still in flight. Safe to ignore — the recorder widget
+      // retries on its own when the user holds the mic button.
+    }
     final dir = await getApplicationDocumentsDirectory();
     final voiceDir = Directory('${dir.path}/voice_notes');
     if (!voiceDir.existsSync()) {
