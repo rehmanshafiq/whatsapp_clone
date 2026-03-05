@@ -197,9 +197,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
           recentsLimit: 40,
         ),
         // Enable skin tones
-        skinToneConfig: const SkinToneConfig(
-          // enableSkinTones: true,
-        ),
+        skinToneConfig: const SkinToneConfig(),
         // Category bar (top)
         categoryViewConfig: CategoryViewConfig(
           backgroundColor: AppColors.appBar,
