@@ -4,38 +4,52 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 class StickerService {
   final Dio _dio;
 
+  static const String _appKey = 'jcVWfs4rnAtZ6POPNb3i5VyMKbGGgcY0WUnJaSXEBQ0XmUVtQDnsuJkm5SNeY12Z';
+  static const String _baseUrl = 'https://api.klipy.com/api/v1/$_appKey';
+
   StickerService({Dio? dio}) : _dio = dio ?? Dio() {
-    final baseUrl = dotenv.env['API_BASE_URL'] ?? 'https://api.whatsapp-clone.mock/v1';
-    _dio.options.baseUrl = baseUrl;
+    _dio.options.baseUrl = _baseUrl;
   }
 
-  Future<List<String>> getTrendingStickers({int offset = 0, int limit = 20}) async {
+  Future<List<String>> getTrendingStickers({int page = 1, int limit = 20}) async {
     try {
-      // In a real Klippy API integration, this would be the actual endpoint
-      // e.g., final response = await _dio.get('/stickers/trending', queryParameters: {'offset': offset, 'limit': limit});
+      final response = await _dio.get('/stickers/trending', queryParameters: {
+        'page': page,
+        'per_page': limit,
+      });
       
-      await Future.delayed(const Duration(milliseconds: 800));
-      // Dummy sticker URLs
-      return List.generate(
-        limit,
-        (index) => 'https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExcHJsdGRwb3MwODU1Y3psamY0amZ0anMxdXR6ZmxkZjVlbnkwcmhtMyZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/l4pTfx2qLszoacZRS/giphy.gif',
-      );
+      if (response.data['result'] == true && response.data['data'] != null) {
+        final List<dynamic> items = response.data['data']['data'] ?? [];
+        return items
+            .map((item) => item['file']?['md']?['gif']?['url'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+      return [];
     } catch (e) {
+      print('Error fetching trending stickers: $e');
       return [];
     }
   }
 
-  Future<List<String>> searchStickers(String query, {int offset = 0, int limit = 20}) async {
+  Future<List<String>> searchStickers(String query, {int page = 1, int limit = 20}) async {
     try {
-      // final response = await _dio.get('/stickers/search', queryParameters: {'q': query, 'offset': offset, 'limit': limit});
+      final response = await _dio.get('/stickers/search', queryParameters: {
+        'q': query,
+        'page': page,
+        'per_page': limit,
+      });
       
-      await Future.delayed(const Duration(milliseconds: 800));
-      // Dummy search sticker URLs
-      return List.generate(
-        limit,
-        (index) => 'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExMjRteHlzZDgyaXYyYzcwNWw4YW9qOTdrdXVyNDIzMzYxZG0xbHNubSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9cw/3o7TKsy4E4A1Z7sFjy/giphy.gif',
-      );
+      if (response.data['result'] == true && response.data['data'] != null) {
+        final List<dynamic> items = response.data['data']['data'] ?? [];
+        return items
+            .map((item) => item['file']?['md']?['gif']?['url'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+      return [];
     } catch (e) {
+      print('Error searching stickers: $e');
       return [];
     }
   }

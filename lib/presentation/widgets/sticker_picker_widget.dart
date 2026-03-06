@@ -21,7 +21,7 @@ class _StickerPickerWidgetState extends State<StickerPickerWidget> {
   bool _isLoading = false;
   bool _hasMore = true;
   String _currentQuery = '';
-  int _offset = 0;
+  int _page = 1;
   final int _limit = 20;
 
   @override
@@ -50,7 +50,7 @@ class _StickerPickerWidgetState extends State<StickerPickerWidget> {
     setState(() {
       _isLoading = true;
       if (!loadMore) {
-        _offset = 0;
+        _page = 1;
         _stickers.clear();
         _hasMore = true;
       }
@@ -58,8 +58,8 @@ class _StickerPickerWidgetState extends State<StickerPickerWidget> {
 
     try {
       final newStickers = _currentQuery.isEmpty
-          ? await _stickerService.getTrendingStickers(offset: _offset, limit: _limit)
-          : await _stickerService.searchStickers(_currentQuery, offset: _offset, limit: _limit);
+          ? await _stickerService.getTrendingStickers(page: _page, limit: _limit)
+          : await _stickerService.searchStickers(_currentQuery, page: _page, limit: _limit);
 
       if (mounted) {
         setState(() {
@@ -67,7 +67,7 @@ class _StickerPickerWidgetState extends State<StickerPickerWidget> {
             _hasMore = false;
           } else {
             _stickers.addAll(newStickers);
-            _offset += newStickers.length;
+            _page++;
           }
         });
       }

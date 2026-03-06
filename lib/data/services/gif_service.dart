@@ -3,39 +3,53 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 class GifService {
   final Dio _dio;
+  
+  static const String _appKey = 'jcVWfs4rnAtZ6POPNb3i5VyMKbGGgcY0WUnJaSXEBQ0XmUVtQDnsuJkm5SNeY12Z';
+  static const String _baseUrl = 'https://api.klipy.com/api/v1/$_appKey';
 
   GifService({Dio? dio}) : _dio = dio ?? Dio() {
-    final baseUrl = dotenv.env['API_BASE_URL'] ?? 'https://api.whatsapp-clone.mock/v1';
-    _dio.options.baseUrl = baseUrl;
+    _dio.options.baseUrl = _baseUrl;
   }
 
-  Future<List<String>> getTrendingGifs({int offset = 0, int limit = 20}) async {
+  Future<List<String>> getTrendingGifs({int page = 1, int limit = 20}) async {
     try {
-      // In a real Klippy API integration, this would be the actual endpoint
-      // e.g., final response = await _dio.get('/gifs/trending', queryParameters: {'offset': offset, 'limit': limit});
+      final response = await _dio.get('/gifs/trending', queryParameters: {
+        'page': page,
+        'per_page': limit,
+      });
       
-      // Since this is a mock environment, we return a list of dummy GIF URLs
-      await Future.delayed(const Duration(milliseconds: 800));
-      return List.generate(
-        limit,
-        (index) => 'https://media0.giphy.com/media/v1.Y2lkPTc5MGI3NjExc29teWZobmE1d211ajJtZWxkNGY2YmRxZjJxcWwxdndxeDNpdnR2diZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/3o7TKSjRrfIPjeiVyM/giphy.gif',
-      );
+      if (response.data['result'] == true && response.data['data'] != null) {
+        final List<dynamic> items = response.data['data']['data'] ?? [];
+        return items
+            .map((item) => item['file']?['md']?['gif']?['url'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+      return [];
     } catch (e) {
+      print('Error fetching trending gifs: $e');
       return [];
     }
   }
 
-  Future<List<String>> searchGifs(String query, {int offset = 0, int limit = 20}) async {
+  Future<List<String>> searchGifs(String query, {int page = 1, int limit = 20}) async {
     try {
-      // final response = await _dio.get('/gifs/search', queryParameters: {'q': query, 'offset': offset, 'limit': limit});
+      final response = await _dio.get('/gifs/search', queryParameters: {
+        'q': query,
+        'page': page,
+        'per_page': limit,
+      });
       
-      await Future.delayed(const Duration(milliseconds: 800));
-      // Return a different dummy GIF for search
-      return List.generate(
-        limit,
-        (index) => 'https://media1.giphy.com/media/v1.Y2lkPTc5MGI3NjExdW9tYndoeGJvYW90YXFwcWZxdW1xaDVyeGZzZWJqdHRrMm5xbHB2eCZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/l41lFw057lAJQMwg0/giphy.gif',
-      );
+      if (response.data['result'] == true && response.data['data'] != null) {
+        final List<dynamic> items = response.data['data']['data'] ?? [];
+        return items
+            .map((item) => item['file']?['md']?['gif']?['url'] as String?)
+            .whereType<String>()
+            .toList();
+      }
+      return [];
     } catch (e) {
+      print('Error searching gifs: $e');
       return [];
     }
   }

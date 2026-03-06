@@ -21,7 +21,7 @@ class _GifPickerWidgetState extends State<GifPickerWidget> {
   bool _isLoading = false;
   bool _hasMore = true;
   String _currentQuery = '';
-  int _offset = 0;
+  int _page = 1;
   final int _limit = 20;
 
   @override
@@ -50,7 +50,7 @@ class _GifPickerWidgetState extends State<GifPickerWidget> {
     setState(() {
       _isLoading = true;
       if (!loadMore) {
-        _offset = 0;
+        _page = 1;
         _gifs.clear();
         _hasMore = true;
       }
@@ -58,8 +58,8 @@ class _GifPickerWidgetState extends State<GifPickerWidget> {
 
     try {
       final newGifs = _currentQuery.isEmpty
-          ? await _gifService.getTrendingGifs(offset: _offset, limit: _limit)
-          : await _gifService.searchGifs(_currentQuery, offset: _offset, limit: _limit);
+          ? await _gifService.getTrendingGifs(page: _page, limit: _limit)
+          : await _gifService.searchGifs(_currentQuery, page: _page, limit: _limit);
 
       if (mounted) {
         setState(() {
@@ -67,7 +67,7 @@ class _GifPickerWidgetState extends State<GifPickerWidget> {
             _hasMore = false;
           } else {
             _gifs.addAll(newGifs);
-            _offset += newGifs.length;
+            _page++;
           }
         });
       }
