@@ -62,6 +62,13 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   Future<void> _initCamera(CameraDescription camera) async {
     final prevController = _controller;
+
+    // Must dispose of the old camera before initializing the new one,
+    // otherwise hardware locks prevent the new camera from starting.
+    if (prevController != null) {
+      await prevController.dispose();
+    }
+
     final newController = CameraController(
       camera,
       ResolutionPreset.high,
@@ -85,10 +92,6 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     } catch (e) {
       debugPrint('Camera init error: $e');
       if (mounted) setState(() => _hasPermissionError = true);
-    }
-
-    if (prevController != null) {
-      await prevController.dispose();
     }
   }
 
