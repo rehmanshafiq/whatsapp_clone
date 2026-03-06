@@ -28,6 +28,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   final _scrollController = ScrollController();
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
+  bool _showScrollToBottom = false;
 
   @override
   void initState() {
@@ -35,6 +36,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _reactionsController = ReactionsController(
       currentUserId: AppConstants.currentUserId,
     );
+    _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatCubit>().loadMessages(widget.channelId);
     });
@@ -43,8 +45,25 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   void dispose() {
     getIt<AudioPlaybackService>().stop();
-    _scrollController.dispose();
+    _scrollController
+      ..removeListener(_handleScroll)
+      ..dispose();
     super.dispose();
+  }
+
+  void _handleScroll() {
+    if (!_scrollController.hasClients) return;
+    final position = _scrollController.position;
+
+    // Consider "at bottom" when the user is within 80px of the max extent.
+    final isAtBottom =
+        position.pixels >= (position.maxScrollExtent - 80.0);
+
+    if (isAtBottom && _showScrollToBottom) {
+      setState(() => _showScrollToBottom = false);
+    } else if (!isAtBottom && !_showScrollToBottom) {
+      setState(() => _showScrollToBottom = true);
+    }
   }
 
   void _syncReactions(List<Message> messages) {
@@ -85,11 +104,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final cubit = context.read<ChatCubit>();
 
         // Sync reactions from persisted messages when we first have messages
-        // (covers initial load and re-entering the chat).
+        // (covers initial load and re-entering the chat) and jump to the bottom
+        // so the latest messages are visible by default.
         if (state.messages.isNotEmpty && !_reactionsSynced) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (!mounted) return;
             _syncReactions(state.messages);
+            _scrollToBottom();
           });
         }
 
@@ -204,6 +225,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                   ],
                 ),
+                if (_showScrollToBottom)
+                  Positioned(
+                    right: 16,
+                    bottom: 80,
+                    child: FloatingActionButton.small(
+                      heroTag: 'scroll_to_bottom',
+                      backgroundColor: AppColors.accent,
+                      onPressed: _scrollToBottom,
+                      child: const Icon(
+                        Icons.keyboard_arrow_down,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
