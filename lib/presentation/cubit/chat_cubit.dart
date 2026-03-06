@@ -121,6 +121,36 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  Future<void> sendImageMessage(String channelId, String imagePath, {String text = ''}) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final message = await _repository.sendImageMessage(channelId, imagePath, text: text);
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  Future<void> sendVideoMessage(String channelId, String videoPath, {String text = ''}) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final message = await _repository.sendVideoMessage(channelId, videoPath, text: text);
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
   void _simulateMessageLifecycle(Message message) {
     final timers = <Timer>[];
 

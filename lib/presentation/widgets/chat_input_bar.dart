@@ -10,14 +10,17 @@ import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import '../../core/theme/app_theme.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
+import '../screens/camera_screen.dart';
 
 class ChatInputBar extends StatefulWidget {
+  final String channelId;
   final ValueChanged<String> onSend;
   final void Function(File audioFile, Duration duration) onSendAudio;
   final void Function(String mediaUrl, bool isSticker) onSendMedia;
 
   const ChatInputBar({
     super.key,
+    required this.channelId,
     required this.onSend,
     required this.onSendAudio,
     required this.onSendMedia,
@@ -394,9 +397,15 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           ),
           if (showCamera)
             IconButton(
-              icon: const Icon(Icons.camera_alt,
-                  color: AppColors.iconMuted),
-              onPressed: () {},
+              icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => CameraScreen(channelId: widget.channelId),
+                  ),
+                );
+              },
             ),
         ],
       ),

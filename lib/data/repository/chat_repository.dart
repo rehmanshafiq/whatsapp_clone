@@ -129,6 +129,54 @@ class ChatRepository {
     }
   }
 
+  Future<Message> sendImageMessage(String channelId, String imagePath, {String text = ''}) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_image',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: text,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.image,
+        mediaUrl: imagePath,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<Message> sendVideoMessage(String channelId, String videoPath, {String text = ''}) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_video',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: text,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.video,
+        mediaUrl: videoPath,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, '\u{1F3A5} Video');
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Message generateAutoReply(String channelId) {
     final reply = AppConstants.autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
     final message = Message(

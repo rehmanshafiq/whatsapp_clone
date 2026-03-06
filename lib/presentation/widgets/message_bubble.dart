@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:video_player/video_player.dart';
+import 'dart:io';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
@@ -26,6 +28,10 @@ class MessageBubble extends StatelessWidget {
     Widget bubble;
     if (message.isAudio) {
       bubble = AudioMessageBubble(message: message);
+    } else if (message.isImage) {
+      bubble = _MediaMessageBubble(message: message, isSticker: false);
+    } else if (message.isVideo) {
+      bubble = _VideoMessageBubble(message: message);
     } else if (message.isGif) {
       bubble = _MediaMessageBubble(message: message, isSticker: false);
     } else if (message.isSticker) {
@@ -244,30 +250,37 @@ class _MediaMessageBubble extends StatelessWidget {
             if (message.mediaUrl != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-                child: CachedNetworkImage(
-                  imageUrl: message.mediaUrl!,
-                  width: isSticker ? 120 : null,
-                  height: isSticker ? 120 : null,
-                  fit: isSticker ? BoxFit.contain : BoxFit.cover,
-                  placeholder: (context, url) => Container(
-                    width: isSticker ? 120 : 200,
-                    height: isSticker ? 120 : 200,
-                    color: AppColors.chatBackground,
-                    child: const Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
+                child: message.mediaUrl!.startsWith('http')
+                    ? CachedNetworkImage(
+                        imageUrl: message.mediaUrl!,
+                        width: isSticker ? 120 : null,
+                        height: isSticker ? 120 : null,
+                        fit: isSticker ? BoxFit.contain : BoxFit.cover,
+                        placeholder: (context, url) => Container(
+                          width: isSticker ? 120 : 200,
+                          height: isSticker ? 120 : 200,
+                          color: AppColors.chatBackground,
+                          child: const Center(
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                            ),
+                          ),
+                        ),
+                        errorWidget: (context, url, error) => Container(
+                          width: isSticker ? 120 : 200,
+                          height: isSticker ? 120 : 200,
+                          color: AppColors.chatBackground,
+                          child: const Center(
+                            child: Icon(Icons.error_outline),
+                          ),
+                        ),
+                      )
+                    : Image.file(
+                        File(message.mediaUrl!),
+                        width: isSticker ? 120 : null,
+                        height: isSticker ? 120 : null,
+                        fit: isSticker ? BoxFit.contain : BoxFit.cover,
                       ),
-                    ),
-                  ),
-                  errorWidget: (context, url, error) => Container(
-                    width: isSticker ? 120 : 200,
-                    height: isSticker ? 120 : 200,
-                    color: AppColors.chatBackground,
-                    child: const Center(
-                      child: Icon(Icons.error_outline),
-                    ),
-                  ),
-                ),
               ),
             if (!isSticker) const SizedBox(height: 2),
             if (!isSticker)
@@ -287,6 +300,164 @@ class _MediaMessageBubble extends StatelessWidget {
                     ],
                 ],
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VideoMessageBubble extends StatefulWidget {
+  final Message message;
+
+  const _VideoMessageBubble({required this.message});
+
+  @override
+  State<_VideoMessageBubble> createState() => _VideoMessageBubbleState();
+}
+
+class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
+  VideoPlayerController? _controller;
+  bool _initialized = false;
+  bool _error = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _initVideo();
+  }
+
+  Future<void> _initVideo() async {
+    final url = widget.message.mediaUrl;
+    if (url == null) return;
+    
+    try {
+      if (url.startsWith('http')) {
+        _controller = VideoPlayerController.networkUrl(Uri.parse(url));
+      } else {
+        _controller = VideoPlayerController.file(File(url));
+      }
+      
+      await _controller!.initialize();
+      if (mounted) {
+        setState(() => _initialized = true);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _error = true);
+      }
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isOutgoing = widget.message.isOutgoing;
+    final period = widget.message.timestamp.hour >= 12 ? 'PM' : 'AM';
+    final hourRaw = widget.message.timestamp.hour % 12;
+    final time =
+        '${hourRaw == 0 ? 12 : hourRaw}:${widget.message.timestamp.minute.toString().padLeft(2, '0')} $period';
+
+    return Align(
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        margin: EdgeInsets.only(
+          left: isOutgoing ? 64 : 8,
+          right: isOutgoing ? 8 : 64,
+          top: 2,
+          bottom: 2,
+        ),
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
+          borderRadius: BorderRadius.only(
+            topLeft: const Radius.circular(12),
+            topRight: const Radius.circular(12),
+            bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+            bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(8),
+              child: _error
+                  ? Container(
+                      height: 200,
+                      color: Colors.black12,
+                      child: const Center(child: Icon(Icons.error_outline)),
+                    )
+                  : _initialized
+                      ? Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            AspectRatio(
+                              aspectRatio: _controller!.value.aspectRatio,
+                              child: VideoPlayer(_controller!),
+                            ),
+                            GestureDetector(
+                              onTap: () {
+                                setState(() {
+                                  _controller!.value.isPlaying
+                                      ? _controller!.pause()
+                                      : _controller!.play();
+                                });
+                              },
+                              child: CircleAvatar(
+                                backgroundColor: Colors.black45,
+                                child: Icon(
+                                  _controller!.value.isPlaying
+                                      ? Icons.pause
+                                      : Icons.play_arrow,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      : Container(
+                          height: 200,
+                          color: Colors.black12,
+                          child: const Center(child: CircularProgressIndicator()),
+                        ),
+            ),
+            if (widget.message.text.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+                child: Text(
+                  widget.message.text,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 15,
+                  ),
+                ),
+              ),
+            const SizedBox(height: 2),
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  time,
+                  style: TextStyle(
+                    color: AppColors.textSecondary.withValues(alpha: 0.7),
+                    fontSize: 11,
+                  ),
+                ),
+                if (isOutgoing) ...[
+                  const SizedBox(width: 4),
+                  MessageStatusIcon(status: widget.message.status, size: 14),
+                ],
+              ],
+            ),
           ],
         ),
       ),

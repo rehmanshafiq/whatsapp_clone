@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import 'message_status.dart';
 
-enum MessageType { text, audio, gif, sticker }
+enum MessageType { text, audio, gif, sticker, image, video }
 
 class Message extends Equatable {
   final String id;
@@ -98,6 +98,8 @@ class Message extends Equatable {
   bool get isAudio => type == MessageType.audio;
   bool get isGif => type == MessageType.gif;
   bool get isSticker => type == MessageType.sticker;
+  bool get isImage => type == MessageType.image;
+  bool get isVideo => type == MessageType.video;
 
   @override
   List<Object?> get props => [
