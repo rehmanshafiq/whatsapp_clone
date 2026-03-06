@@ -170,6 +170,7 @@ class _TextMessageBubble extends StatelessWidget {
           ),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
@@ -245,6 +246,7 @@ class _MediaMessageBubble extends StatelessWidget {
                 ),
               ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             if (message.mediaUrl != null)
@@ -287,17 +289,17 @@ class _MediaMessageBubble extends StatelessWidget {
               Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                   Text(
-                      time,
-                      style: TextStyle(
-                        color: AppColors.textSecondary.withValues(alpha: 0.7),
-                        fontSize: 11,
-                      ),
+                  Text(
+                    time,
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
                     ),
-                    if (isOutgoing) ...[
-                      const SizedBox(width: 4),
-                      MessageStatusIcon(status: message.status, size: 14),
-                    ],
+                  ),
+                  if (isOutgoing) ...[
+                    const SizedBox(width: 4),
+                    MessageStatusIcon(status: message.status, size: 14),
+                  ],
                 ],
               ),
           ],
@@ -386,6 +388,7 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
           ),
         ),
         child: Column(
+          mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             ClipRRect(
