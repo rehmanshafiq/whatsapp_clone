@@ -101,6 +101,34 @@ class ChatRepository {
     }
   }
 
+  Future<Message> sendMediaMessage(
+    String channelId,
+    String mediaUrl,
+    bool isSticker,
+  ) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_media',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: '',
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: isSticker ? MessageType.sticker : MessageType.gif,
+        mediaUrl: mediaUrl,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, isSticker ? 'Sticker' : 'GIF');
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Message generateAutoReply(String channelId) {
     final reply = AppConstants.autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
     final message = Message(

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
@@ -22,9 +23,16 @@ class MessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bubble = message.isAudio
-        ? AudioMessageBubble(message: message)
-        : _TextMessageBubble(message: message);
+    Widget bubble;
+    if (message.isAudio) {
+      bubble = AudioMessageBubble(message: message);
+    } else if (message.isGif) {
+      bubble = _MediaMessageBubble(message: message, isSticker: false);
+    } else if (message.isSticker) {
+      bubble = _MediaMessageBubble(message: message, isSticker: true);
+    } else {
+      bubble = _TextMessageBubble(message: message);
+    }
 
     return ChatMessageWrapper(
       messageId: message.id,
@@ -183,6 +191,102 @@ class _TextMessageBubble extends StatelessWidget {
                 ],
               ],
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MediaMessageBubble extends StatelessWidget {
+  final Message message;
+  final bool isSticker;
+
+  const _MediaMessageBubble({required this.message, required this.isSticker});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOutgoing = message.isOutgoing;
+    final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
+    final hourRaw = message.timestamp.hour % 12;
+    final time =
+        '${hourRaw == 0 ? 12 : hourRaw}:${message.timestamp.minute.toString().padLeft(2, '0')} $period';
+
+    return Align(
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.of(context).size.width * 0.75,
+        ),
+        margin: EdgeInsets.only(
+          left: isOutgoing ? 64 : 8,
+          right: isOutgoing ? 8 : 64,
+          top: 2,
+          bottom: 2,
+        ),
+        padding: isSticker
+            ? EdgeInsets.zero // Stickers often don't have a background bubble
+            : const EdgeInsets.all(4),
+        decoration: isSticker
+            ? null
+            : BoxDecoration(
+                color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
+                borderRadius: BorderRadius.only(
+                  topLeft: const Radius.circular(12),
+                  topRight: const Radius.circular(12),
+                  bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+                  bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+                ),
+              ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            if (message.mediaUrl != null)
+              ClipRRect(
+                borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+                child: CachedNetworkImage(
+                  imageUrl: message.mediaUrl!,
+                  width: isSticker ? 120 : null,
+                  height: isSticker ? 120 : null,
+                  fit: isSticker ? BoxFit.contain : BoxFit.cover,
+                  placeholder: (context, url) => Container(
+                    width: isSticker ? 120 : 200,
+                    height: isSticker ? 120 : 200,
+                    color: AppColors.chatBackground,
+                    child: const Center(
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                      ),
+                    ),
+                  ),
+                  errorWidget: (context, url, error) => Container(
+                    width: isSticker ? 120 : 200,
+                    height: isSticker ? 120 : 200,
+                    color: AppColors.chatBackground,
+                    child: const Center(
+                      child: Icon(Icons.error_outline),
+                    ),
+                  ),
+                ),
+              ),
+            if (!isSticker) const SizedBox(height: 2),
+            if (!isSticker)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                   Text(
+                      time,
+                      style: TextStyle(
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
+                        fontSize: 11,
+                      ),
+                    ),
+                    if (isOutgoing) ...[
+                      const SizedBox(width: 4),
+                      MessageStatusIcon(status: message.status, size: 14),
+                    ],
+                ],
+              ),
           ],
         ),
       ),

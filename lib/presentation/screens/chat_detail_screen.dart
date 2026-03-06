@@ -222,6 +222,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             file.path,
                             duration,
                           ),
+                      onSendMedia: (url, isSticker) =>
+                          cubit.sendMediaMessage(
+                            widget.channelId,
+                            url,
+                            isSticker,
+                          ),
                     ),
                   ],
                 ),

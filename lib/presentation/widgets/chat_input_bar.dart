@@ -8,32 +8,38 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import '../../core/theme/app_theme.dart';
+import 'gif_picker_widget.dart';
+import 'sticker_picker_widget.dart';
 
 class ChatInputBar extends StatefulWidget {
   final ValueChanged<String> onSend;
   final void Function(File audioFile, Duration duration) onSendAudio;
+  final void Function(String mediaUrl, bool isSticker) onSendMedia;
 
   const ChatInputBar({
     super.key,
     required this.onSend,
     required this.onSendAudio,
+    required this.onSendMedia,
   });
 
   @override
   State<ChatInputBar> createState() => _ChatInputBarState();
 }
 
-class _ChatInputBarState extends State<ChatInputBar> {
+class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
   final _textFocusNode = FocusNode();
 
   bool _hasText = false;
   bool _isEmojiVisible = false;
   String? _voiceNoteDir;
+  late final TabController _tabController;
 
   @override
   void initState() {
     super.initState();
+    _tabController = TabController(length: 3, vsync: this);
     _controller.addListener(() {
       final has = _controller.text.trim().isNotEmpty;
       if (has != _hasText) {
@@ -65,6 +71,7 @@ class _ChatInputBarState extends State<ChatInputBar> {
 
   @override
   void dispose() {
+    _tabController.dispose();
     _controller.dispose();
     _textFocusNode.dispose();
     super.dispose();
@@ -150,8 +157,41 @@ class _ChatInputBarState extends State<ChatInputBar> {
           // Emoji picker panel
           if (_isEmojiVisible)
             SizedBox(
-              height: 280,
-              child: _buildEmojiPicker(),
+              height: 320,
+              child: Column(
+                children: [
+                   Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildEmojiPicker(),
+                        GifPickerWidget(
+                          onGifSelected: (url) => widget.onSendMedia(url, false),
+                        ),
+                        StickerPickerWidget(
+                          onStickerSelected: (url) => widget.onSendMedia(url, true),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Container(
+                    height: 40,
+                    color: AppColors.appBar,
+                    child: TabBar(
+                      controller: _tabController,
+                      indicatorColor: AppColors.accent,
+                      labelColor: AppColors.accent,
+                      unselectedLabelColor: AppColors.iconMuted,
+                      indicatorSize: TabBarIndicatorSize.tab,
+                      tabs: const [
+                        Tab(icon: Icon(Icons.emoji_emotions_outlined)),
+                        Tab(text: 'GIF'),
+                        Tab(icon: Icon(Icons.sticky_note_2_outlined)),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
             ),
 
           // Input bar

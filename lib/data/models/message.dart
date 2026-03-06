@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import 'message_status.dart';
 
-enum MessageType { text, audio }
+enum MessageType { text, audio, gif, sticker }
 
 class Message extends Equatable {
   final String id;
@@ -14,6 +14,7 @@ class Message extends Equatable {
   final MessageType type;
   final String? audioPath;
   final Duration? audioDuration;
+  final String? mediaUrl; // For GIF or Sticker
   final Map<String, List<String>> reactions;
 
   const Message({
@@ -26,6 +27,7 @@ class Message extends Equatable {
     this.type = MessageType.text,
     this.audioPath,
     this.audioDuration,
+    this.mediaUrl,
     this.reactions = const {},
   });
 
@@ -39,6 +41,7 @@ class Message extends Equatable {
     MessageType? type,
     String? audioPath,
     Duration? audioDuration,
+    String? mediaUrl,
     Map<String, List<String>>? reactions,
   }) {
     return Message(
@@ -51,6 +54,7 @@ class Message extends Equatable {
       type: type ?? this.type,
       audioPath: audioPath ?? this.audioPath,
       audioDuration: audioDuration ?? this.audioDuration,
+      mediaUrl: mediaUrl ?? this.mediaUrl,
       reactions: reactions ?? this.reactions,
     );
   }
@@ -65,6 +69,7 @@ class Message extends Equatable {
         'type': type.index,
         'audioPath': audioPath,
         'audioDuration': audioDuration?.inMilliseconds,
+        'mediaUrl': mediaUrl,
         'reactions': reactions.map((k, v) => MapEntry(k, v)),
       };
 
@@ -82,6 +87,7 @@ class Message extends Equatable {
         audioDuration: json['audioDuration'] != null
             ? Duration(milliseconds: json['audioDuration'] as int)
             : null,
+        mediaUrl: json['mediaUrl'] as String?,
         reactions: (json['reactions'] as Map<String, dynamic>?)?.map(
               (k, v) => MapEntry(k, List<String>.from(v as List)),
             ) ??
@@ -90,6 +96,8 @@ class Message extends Equatable {
 
   bool get isOutgoing => senderId == 'me';
   bool get isAudio => type == MessageType.audio;
+  bool get isGif => type == MessageType.gif;
+  bool get isSticker => type == MessageType.sticker;
 
   @override
   List<Object?> get props => [
@@ -102,6 +110,7 @@ class Message extends Equatable {
         type,
         audioPath,
         audioDuration,
+        mediaUrl,
         reactions,
       ];
 }
