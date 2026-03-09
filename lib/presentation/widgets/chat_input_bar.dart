@@ -8,6 +8,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import '../../core/theme/app_theme.dart';
+import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
 import '../screens/camera_screen.dart';
@@ -393,7 +394,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           ),
           IconButton(
             icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
-            onPressed: () {},
+            onPressed: () => showAttachmentSheet(context),
           ),
           if (showCamera)
             IconButton(
