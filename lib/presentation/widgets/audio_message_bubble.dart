@@ -359,8 +359,14 @@ class _SeekableWaveformBar extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
+        const barWidth = 2.5;
+        const barSpacing = 1.5;
+        final barCount =
+            (constraints.maxWidth / (barWidth + barSpacing)).floor().clamp(1, 40);
+        final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;
+
         double fractionFromX(double dx) =>
-            (dx / constraints.maxWidth).clamp(0.0, 1.0);
+            (dx / totalBarsWidth).clamp(0.0, 1.0);
 
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
@@ -415,16 +421,21 @@ class _WaveformPainter extends CustomPainter {
     const barSpacing = 1.5;
     final barCount =
         (size.width / (barWidth + barSpacing)).floor().clamp(1, _barHeights.length);
-    final progressX = size.width * progress;
+
+    // The actual width the waveform bars occupy (last bar has no trailing gap)
+    final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;
+    // Map the seek dot to the waveform width, not full canvas width
+    final progressX = totalBarsWidth * progress;
 
     for (int i = 0; i < barCount; i++) {
       final x = i * (barWidth + barSpacing);
+      final barCenter = x + barWidth / 2;
       final heightFactor = _barHeights[i % _barHeights.length];
       final barHeight = size.height * heightFactor;
       final y = (size.height - barHeight) / 2;
 
       final paint = Paint()
-        ..color = x < progressX ? activeColor : inactiveColor
+        ..color = barCenter <= progressX ? activeColor : inactiveColor
         ..style = PaintingStyle.fill;
 
       canvas.drawRRect(
@@ -438,8 +449,8 @@ class _WaveformPainter extends CustomPainter {
 
     if (progress > 0 && progress < 1) {
       canvas.drawCircle(
-        Offset(progressX.clamp(0, size.width), size.height / 2),
-        3.5,
+        Offset(progressX.clamp(0.0, totalBarsWidth), size.height / 2),
+        4.0,
         Paint()..color = activeColor,
       );
     }
