@@ -157,26 +157,20 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          // Input bar
+          Container(
+            color: AppColors.scaffold,
+            padding:
+            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: _hasText ? _buildTextMode() : _buildRecorderMode(),
+          ),
+
           // Emoji picker panel
           if (_isEmojiVisible)
             SizedBox(
               height: 320,
               child: Column(
                 children: [
-                   Expanded(
-                    child: TabBarView(
-                      controller: _tabController,
-                      children: [
-                        _buildEmojiPicker(),
-                        GifPickerWidget(
-                          onGifSelected: (url) => widget.onSendMedia(url, false),
-                        ),
-                        StickerPickerWidget(
-                          onStickerSelected: (url) => widget.onSendMedia(url, true),
-                        ),
-                      ],
-                    ),
-                  ),
                   Container(
                     height: 40,
                     color: AppColors.appBar,
@@ -193,17 +187,23 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                       ],
                     ),
                   ),
+                  Expanded(
+                    child: TabBarView(
+                      controller: _tabController,
+                      children: [
+                        _buildEmojiPicker(),
+                        GifPickerWidget(
+                          onGifSelected: (url) => widget.onSendMedia(url, false),
+                        ),
+                        StickerPickerWidget(
+                          onStickerSelected: (url) => widget.onSendMedia(url, true),
+                        ),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
-
-          // Input bar
-          Container(
-            color: AppColors.scaffold,
-            padding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: _hasText ? _buildTextMode() : _buildRecorderMode(),
-          ),
         ],
       ),
     );
