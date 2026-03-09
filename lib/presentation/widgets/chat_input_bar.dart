@@ -139,15 +139,15 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   void _toggleEmojiPicker() {
-    setState(() {
-      _isEmojiVisible = !_isEmojiVisible;
-    });
-
-    // Bonus behavior:
-    // - We DO NOT unfocus the TextField here.
-    // - That means if the keyboard is already open, it stays open.
-    // If you later want WhatsApp-like behavior (emoji replaces keyboard),
-    // you can add FocusScope.of(context).unfocus() when opening.
+    if (_isEmojiVisible) {
+      // Switching from emoji → keyboard: hide emoji panel, open keyboard
+      setState(() => _isEmojiVisible = false);
+      _textFocusNode.requestFocus();
+    } else {
+      // Switching from keyboard → emoji: dismiss keyboard, show emoji panel
+      _textFocusNode.unfocus();
+      setState(() => _isEmojiVisible = true);
+    }
   }
 
   @override
