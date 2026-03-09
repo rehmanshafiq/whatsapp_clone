@@ -172,16 +172,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 ],
               ),
-              actions: [
-                IconButton(
-                  icon: const Icon(Icons.videocam, color: AppColors.iconMuted),
-                  onPressed: () {},
-                ),
-                IconButton(
-                  icon: const Icon(Icons.call, color: AppColors.iconMuted),
-                  onPressed: () {},
-                ),
-              ],
             ),
             body: Stack(
               children: [

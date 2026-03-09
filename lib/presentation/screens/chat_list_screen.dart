@@ -135,7 +135,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       pathParameters: {'id': channel.id},
                     );
                   },
-                  onDelete: () => _showDeleteDialog(context, cubit, channel.id),
                 );
               },
             ),
@@ -150,31 +149,4 @@ class _ChatListScreenState extends State<ChatListScreen> {
     );
   }
 
-  void _showDeleteDialog(BuildContext context, ChatCubit cubit, String id) {
-    showDialog(
-      context: context,
-      builder: (_) => AlertDialog(
-        backgroundColor: AppColors.appBar,
-        title: const Text('Delete chat?',
-            style: TextStyle(color: AppColors.textPrimary)),
-        content: const Text('This chat will be permanently deleted.',
-            style: TextStyle(color: AppColors.textSecondary)),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () {
-              cubit.deleteChat(id);
-              Navigator.of(context).pop();
-            },
-            child:
-                const Text('Delete', style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 }

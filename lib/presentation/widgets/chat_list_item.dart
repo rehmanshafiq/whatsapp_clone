@@ -8,13 +8,11 @@ import 'unread_badge.dart';
 class ChatListItem extends StatelessWidget {
   final ChatChannel channel;
   final VoidCallback onTap;
-  final VoidCallback onDelete;
 
   const ChatListItem({
     super.key,
     required this.channel,
     required this.onTap,
-    required this.onDelete,
   });
 
   String _formatTime(DateTime time) {
@@ -39,96 +37,81 @@ class ChatListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Dismissible(
-      key: Key(channel.id),
-      direction: DismissDirection.endToStart,
-      background: Container(
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.only(right: 20),
-        color: Colors.red.shade700,
-        child: const Icon(Icons.delete, color: Colors.white),
-      ),
-      confirmDismiss: (_) async {
-        onDelete();
-        return false;
-      },
-      child: InkWell(
-        onTap: onTap,
-        onLongPress: onDelete,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          child: Row(
-            children: [
-              ChatAvatar(
-                imageUrl: channel.avatarUrl,
-                name: channel.name,
-                heroTag: 'avatar_${channel.id}',
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            channel.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 16,
-                            ),
+    return InkWell(
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: [
+            ChatAvatar(
+              imageUrl: channel.avatarUrl,
+              name: channel.name,
+              heroTag: 'avatar_${channel.id}',
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          channel.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 16,
                           ),
                         ),
-                        Text(
-                          _formatTime(channel.lastMessageTime),
+                      ),
+                      Text(
+                        _formatTime(channel.lastMessageTime),
+                        style: TextStyle(
+                          color: channel.unreadCount > 0
+                              ? AppColors.accent
+                              : AppColors.textSecondary,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: [
+                      if (channel.unreadCount == 0 && channel.lastMessage.isNotEmpty)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 4),
+                          child: Icon(Icons.done_all, size: 16, color: AppColors.seenTick),
+                        ),
+                      Expanded(
+                        child: Text(
+                          channel.lastMessage.isEmpty
+                              ? 'Tap to start chatting'
+                              : channel.lastMessage,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            color: channel.unreadCount > 0
-                                ? AppColors.accent
+                            color: channel.lastMessage.isEmpty
+                                ? AppColors.textSecondary.withValues(alpha: 0.6)
                                 : AppColors.textSecondary,
-                            fontSize: 12,
+                            fontSize: 14,
+                            fontStyle: channel.lastMessage.isEmpty
+                                ? FontStyle.italic
+                                : FontStyle.normal,
                           ),
                         ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: [
-                        if (channel.unreadCount == 0 && channel.lastMessage.isNotEmpty)
-                          const Padding(
-                            padding: EdgeInsets.only(right: 4),
-                            child: Icon(Icons.done_all, size: 16, color: AppColors.seenTick),
-                          ),
-                        Expanded(
-                          child: Text(
-                            channel.lastMessage.isEmpty
-                                ? 'Tap to start chatting'
-                                : channel.lastMessage,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              color: channel.lastMessage.isEmpty
-                                  ? AppColors.textSecondary.withValues(alpha: 0.6)
-                                  : AppColors.textSecondary,
-                              fontSize: 14,
-                              fontStyle: channel.lastMessage.isEmpty
-                                  ? FontStyle.italic
-                                  : FontStyle.normal,
-                            ),
-                          ),
-                        ),
-                        if (channel.unreadCount > 0)
-                          UnreadBadge(count: channel.unreadCount),
-                      ],
-                    ),
-                  ],
-                ),
+                      ),
+                      if (channel.unreadCount > 0)
+                        UnreadBadge(count: channel.unreadCount),
+                    ],
+                  ),
+                ],
               ),
-            ],
-          ),
+            ),
+          ],
         ),
       ),
     );
