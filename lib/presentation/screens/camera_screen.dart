@@ -179,8 +179,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   void _toggleFlash() async {
-    if (_controller == null) return;
-    final modes = [FlashMode.off, FlashMode.auto, FlashMode.always];
+    if (_controller == null || !_controller!.value.isInitialized) return;
+    final modes = [FlashMode.off, FlashMode.auto, FlashMode.always, FlashMode.torch];
     final currentIdx = modes.indexOf(_flashMode);
     final nextMode = modes[(currentIdx + 1) % modes.length];
     await _controller!.setFlashMode(nextMode);
@@ -196,7 +196,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
       case FlashMode.always:
         return Icons.flash_on;
       case FlashMode.torch:
-        return Icons.highlight;
+        return Icons.flashlight_on;
     }
   }
 
@@ -217,6 +217,57 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     final file = await asset.file;
     if (file != null) {
       _openPreviewScreen(file.path, asset.type == AssetType.video);
+    }
+  }
+
+  Future<void> _openFullGallery() async {
+    final PermissionState ps = await PhotoManager.requestPermissionExtend();
+    if (ps.isAuth || ps.hasAccess) {
+      final albums = await PhotoManager.getAssetPathList(
+        type: RequestType.common,
+        onlyAll: true,
+      );
+      if (albums.isEmpty) return;
+
+      final assets = await albums.first.getAssetListPaged(page: 0, size: 100);
+
+      if (!mounted) return;
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        builder: (context) {
+          return SizedBox(
+            height: MediaQuery.of(context).size.height * 0.8,
+            child: GridView.builder(
+              gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                crossAxisCount: 3,
+                crossAxisSpacing: 2,
+                mainAxisSpacing: 2,
+              ),
+              itemCount: assets.length,
+              itemBuilder: (context, index) {
+                final asset = assets[index];
+                return GestureDetector(
+                  onTap: () async {
+                    Navigator.pop(context);
+                    final file = await asset.file;
+                    if (file != null && mounted) {
+                      _openPreviewScreen(file.path, asset.type == AssetType.video);
+                    }
+                  },
+                  child: AssetEntityImage(
+                    asset,
+                    isOriginal: false,
+                    thumbnailSize: const ThumbnailSize.square(200),
+                    fit: BoxFit.cover,
+                  ),
+                );
+              },
+            ),
+          );
+        },
+      );
     }
   }
 
@@ -334,7 +385,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                       // Last Photo Preview (acting as gallery button)
                       _recentMedia.isNotEmpty
                           ? GestureDetector(
-                              onTap: () {}, // Optional fallback to full gallery
+                              onTap: _openFullGallery,
                               child: ClipOval(
                                 child: SizedBox(
                                   width: 44,
