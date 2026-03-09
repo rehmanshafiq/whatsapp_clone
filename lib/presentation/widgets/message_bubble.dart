@@ -284,6 +284,18 @@ class _MediaMessageBubble extends StatelessWidget {
                         fit: isSticker ? BoxFit.contain : BoxFit.cover,
                       ),
               ),
+            if (!isSticker && message.text.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+                child: Text(
+                  message.text,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 15,
+                    height: 1.3,
+                  ),
+                ),
+              ),
             if (!isSticker) const SizedBox(height: 2),
             if (!isSticker)
               Row(
