@@ -55,9 +55,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
 
-    // Consider "at bottom" when the user is within 80px of the max extent.
-    final isAtBottom =
-        position.pixels >= (position.maxScrollExtent - 80.0);
+    // With reverse: true, "bottom" (latest messages) is at pixels == 0.
+    // Show the FAB when the user has scrolled away from the bottom (pixels > 80).
+    final isAtBottom = position.pixels <= 80.0;
 
     if (isAtBottom && _showScrollToBottom) {
       setState(() => _showScrollToBottom = false);
@@ -79,40 +79,45 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  void _scrollToBottom() {
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scrollController.hasClients) {
-        _scrollController.animateTo(
-          _scrollController.position.maxScrollExtent,
-          duration: const Duration(milliseconds: 200),
-          curve: Curves.easeOut,
-        );
-      }
-    });
+  /// Scrolls to the bottom of the list (i.e. the latest messages).
+  ///
+  /// Because the ListView uses [reverse: true], the "bottom" is always at
+  /// pixels == 0, so this is instant and perfectly accurate — no double-frame
+  /// tricks needed.
+  void _scrollToBottom({bool animate = true}) {
+    if (!_scrollController.hasClients) return;
+    if (animate) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _scrollController.jumpTo(0);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<ChatCubit, ChatState>(
-      listenWhen: (prev, curr) => prev.messages.length != curr.messages.length,
+      // Also fire when loading finishes so the initial load scrolls correctly.
+      listenWhen: (prev, curr) =>
+      prev.messages.length != curr.messages.length ||
+          (prev.isLoading && !curr.isLoading && curr.messages.isNotEmpty),
       listener: (_, state) {
-        _scrollToBottom();
         _syncReactions(state.messages);
+        // With reverse: true the list already starts at the bottom on first
+        // load, but we still call _scrollToBottom so newly arrived messages
+        // snap into view if the user isn't already there.
+        _scrollToBottom(animate: state.messages.length > 1);
       },
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
 
-        // Sync reactions from persisted messages when we first have messages
-        // (covers initial load and re-entering the chat) and jump to the bottom
-        // so the latest messages are visible by default.
-        if (state.messages.isNotEmpty && !_reactionsSynced) {
-          WidgetsBinding.instance.addPostFrameCallback((_) {
-            if (!mounted) return;
-            _syncReactions(state.messages);
-            _scrollToBottom();
-          });
-        }
+        // Build a reversed view of messages so index 0 == latest message.
+        // The ListView with reverse:true renders index 0 at the very bottom.
+        final reversedMessages = state.messages.reversed.toList();
 
         return PopScope(
           onPopInvokedWithResult: (didPop, _) {
@@ -176,7 +181,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   icon: const Icon(Icons.call, color: AppColors.iconMuted),
                   onPressed: () {},
                 ),
-
               ],
             ),
             body: Stack(
@@ -193,25 +197,30 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               child: CircularProgressIndicator(
                                   color: AppColors.accent))
                           : ListView.builder(
-                              controller: _scrollController,
-                              padding:
-                                  const EdgeInsets.symmetric(vertical: 8),
-                              itemCount: state.messages.length +
-                                  (state.isTyping ? 1 : 0),
-                              itemBuilder: (context, index) {
-                                if (index == state.messages.length &&
-                                    state.isTyping) {
-                                  return const TypingIndicator();
-                                }
-                                return MessageBubble(
-                                  message: state.messages[index],
-                                  reactionsController:
-                                      _reactionsController,
-                                  onReactionChanged: () =>
-                                      setState(() {}),
-                                );
-                              },
-                            ),
+                        controller: _scrollController,
+                        // reverse: true means index 0 is at the BOTTOM.
+                        // Latest messages (index 0 after reversing the
+                        // list) are always visible without any scrolling.
+                        reverse: true,
+                        padding:
+                        const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: reversedMessages.length +
+                            (state.isTyping ? 1 : 0),
+                        itemBuilder: (context, index) {
+                          // Typing indicator sits at the very bottom
+                          // (index 0 in reversed space).
+                          if (index == 0 && state.isTyping) {
+                            return const TypingIndicator();
+                          }
+                          final messageIndex =
+                          state.isTyping ? index - 1 : index;
+                          return MessageBubble(
+                            message: reversedMessages[messageIndex],
+                            reactionsController: _reactionsController,
+                            onReactionChanged: () => setState(() {}),
+                          );
+                        },
+                      ),
                     ),
                     ChatInputBar(
                       channelId: widget.channelId,
