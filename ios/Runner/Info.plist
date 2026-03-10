@@ -51,5 +51,9 @@
 	<string>This app requires microphone access to record audio for video and voice messages.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>This app requires access to your photo library to select media for chat messages.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app requires location access to share your current and live location in chats.</string>
+	<key>GMSApiKey</key>
+	<string>YOUR_GOOGLE_MAPS_API_KEY</string>
 </dict>
 </plist>

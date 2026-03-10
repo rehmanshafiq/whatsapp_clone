@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:geocoding/geocoding.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -15,6 +17,7 @@ class ChatCubit extends Cubit<ChatState> {
   final _random = Random();
   final Map<String, Timer> _replyTimers = {};
   final Map<String, List<Timer>> _statusTimers = {};
+  final Map<String, Timer> _liveLocationTimers = {};
 
   ChatCubit(this._repository) : super(const ChatState());
 
@@ -39,19 +42,20 @@ class ChatCubit extends Cubit<ChatState> {
       if (channel != null) {
         _repository.clearUnread(channelId);
         final updatedChats = await _repository.getChats();
-        updatedChats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
-        emit(state.copyWith(
-          messages: messages,
-          selectedChannel: channel.copyWith(unreadCount: 0),
-          isOnline: channel.isOnline,
-          isLoading: false,
-          channels: updatedChats,
-        ));
+        updatedChats.sort(
+          (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
+        );
+        emit(
+          state.copyWith(
+            messages: messages,
+            selectedChannel: channel.copyWith(unreadCount: 0),
+            isOnline: channel.isOnline,
+            isLoading: false,
+            channels: updatedChats,
+          ),
+        );
       } else {
-        emit(state.copyWith(
-          messages: messages,
-          isLoading: false,
-        ));
+        emit(state.copyWith(messages: messages, isLoading: false));
       }
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isLoading: false));
@@ -121,10 +125,18 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
-  Future<void> sendImageMessage(String channelId, String imagePath, {String text = ''}) async {
+  Future<void> sendImageMessage(
+    String channelId,
+    String imagePath, {
+    String text = '',
+  }) async {
     emit(state.copyWith(isSending: true));
     try {
-      final message = await _repository.sendImageMessage(channelId, imagePath, text: text);
+      final message = await _repository.sendImageMessage(
+        channelId,
+        imagePath,
+        text: text,
+      );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
@@ -136,16 +148,84 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
-  Future<void> sendVideoMessage(String channelId, String videoPath, {String text = ''}) async {
+  Future<void> sendVideoMessage(
+    String channelId,
+    String videoPath, {
+    String text = '',
+  }) async {
     emit(state.copyWith(isSending: true));
     try {
-      final message = await _repository.sendVideoMessage(channelId, videoPath, text: text);
+      final message = await _repository.sendVideoMessage(
+        channelId,
+        videoPath,
+        text: text,
+      );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
       _scheduleAutoReply(channelId);
       _refreshChannelList();
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  Future<void> sendLocationMessage(
+    String channelId, {
+    required double latitude,
+    required double longitude,
+    required String locationName,
+    required String locationAddress,
+  }) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final message = await _repository.sendLocationMessage(
+        channelId,
+        latitude: latitude,
+        longitude: longitude,
+        locationName: locationName,
+        locationAddress: locationAddress,
+      );
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  Future<void> startLiveLocationSharing(
+    String channelId, {
+    required double latitude,
+    required double longitude,
+    required String locationName,
+    required String locationAddress,
+    required Duration duration,
+  }) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final liveLocationEndsAt = DateTime.now().add(duration);
+      final message = await _repository.sendLocationMessage(
+        channelId,
+        latitude: latitude,
+        longitude: longitude,
+        locationName: locationName,
+        locationAddress: locationAddress,
+        isLiveLocation: true,
+        isLiveLocationActive: true,
+        liveLocationEndsAt: liveLocationEndsAt,
+      );
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
+      _scheduleLiveLocationUpdates(message, duration);
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
@@ -154,17 +234,23 @@ class ChatCubit extends Cubit<ChatState> {
   void _simulateMessageLifecycle(Message message) {
     final timers = <Timer>[];
 
-    timers.add(Timer(AppConstants.sendDelay, () {
-      _updateLocalMessageStatus(message.id, MessageStatus.sent);
-    }));
+    timers.add(
+      Timer(AppConstants.sendDelay, () {
+        _updateLocalMessageStatus(message.id, MessageStatus.sent);
+      }),
+    );
 
-    timers.add(Timer(AppConstants.deliverDelay, () {
-      _updateLocalMessageStatus(message.id, MessageStatus.delivered);
-    }));
+    timers.add(
+      Timer(AppConstants.deliverDelay, () {
+        _updateLocalMessageStatus(message.id, MessageStatus.delivered);
+      }),
+    );
 
-    timers.add(Timer(AppConstants.seenDelay, () {
-      _updateLocalMessageStatus(message.id, MessageStatus.seen);
-    }));
+    timers.add(
+      Timer(AppConstants.seenDelay, () {
+        _updateLocalMessageStatus(message.id, MessageStatus.seen);
+      }),
+    );
 
     _statusTimers[message.id] = timers;
   }
@@ -183,10 +269,14 @@ class ChatCubit extends Cubit<ChatState> {
   void _scheduleAutoReply(String channelId) {
     _replyTimers[channelId]?.cancel();
 
-    final delay = AppConstants.minReplyDelay +
-        Duration(milliseconds: _random.nextInt(
+    final delay =
+        AppConstants.minReplyDelay +
+        Duration(
+          milliseconds: _random.nextInt(
             AppConstants.maxReplyDelay.inMilliseconds -
-                AppConstants.minReplyDelay.inMilliseconds));
+                AppConstants.minReplyDelay.inMilliseconds,
+          ),
+        );
 
     if (!isClosed) {
       emit(state.copyWith(isOnline: true));
@@ -203,10 +293,7 @@ class ChatCubit extends Cubit<ChatState> {
       if (isClosed) return;
       final reply = _repository.generateAutoReply(channelId);
       final updatedMessages = List<Message>.from(state.messages)..add(reply);
-      emit(state.copyWith(
-        messages: updatedMessages,
-        isTyping: false,
-      ));
+      emit(state.copyWith(messages: updatedMessages, isTyping: false));
       _refreshChannelList();
 
       Timer(const Duration(seconds: 2), () {
@@ -217,17 +304,172 @@ class ChatCubit extends Cubit<ChatState> {
     });
   }
 
+  void _scheduleLiveLocationUpdates(Message message, Duration duration) {
+    _liveLocationTimers[message.id]?.cancel();
+    final liveLocationEndsAt =
+        message.liveLocationEndsAt ?? DateTime.now().add(duration);
+
+    _liveLocationTimers[message.id] = Timer.periodic(
+      const Duration(seconds: 15),
+      (timer) async {
+        if (DateTime.now().isAfter(liveLocationEndsAt)) {
+          timer.cancel();
+          _liveLocationTimers.remove(message.id);
+          _setLiveLocationActive(message.id, false);
+          return;
+        }
+
+        try {
+          final position = await Geolocator.getCurrentPosition(
+            locationSettings: const LocationSettings(
+              accuracy: LocationAccuracy.best,
+            ),
+          );
+          final resolvedAddress = await _resolveAddress(
+            position.latitude,
+            position.longitude,
+          );
+          final resolvedName = await _resolveLocationName(
+            position.latitude,
+            position.longitude,
+          );
+
+          _repository.updateLocationMessage(
+            message.id,
+            latitude: position.latitude,
+            longitude: position.longitude,
+            locationName: resolvedName,
+            locationAddress: resolvedAddress,
+            liveLocationUpdatedAt: DateTime.now(),
+            isLiveLocationActive: true,
+          );
+
+          final currentMessage = _messageById(message.id);
+          if (currentMessage == null || isClosed) return;
+
+          final updatedMessage = currentMessage.copyWith(
+            latitude: position.latitude,
+            longitude: position.longitude,
+            locationName: resolvedName,
+            locationAddress: resolvedAddress,
+            text: resolvedAddress,
+            liveLocationUpdatedAt: DateTime.now(),
+            isLiveLocationActive: true,
+          );
+          _replaceMessageInState(updatedMessage);
+        } catch (_) {
+          // Keep the live-location timer running even if one GPS lookup fails.
+        }
+      },
+    );
+  }
+
+  void _setLiveLocationActive(String messageId, bool isActive) {
+    final currentMessage = _messageById(messageId);
+    if (currentMessage == null) return;
+
+    _repository.updateLocationMessage(
+      messageId,
+      latitude: currentMessage.latitude ?? 0,
+      longitude: currentMessage.longitude ?? 0,
+      locationName: currentMessage.locationName ?? 'Live location',
+      locationAddress: currentMessage.locationAddress ?? currentMessage.text,
+      liveLocationUpdatedAt: DateTime.now(),
+      isLiveLocationActive: isActive,
+    );
+
+    _replaceMessageInState(
+      currentMessage.copyWith(
+        liveLocationUpdatedAt: DateTime.now(),
+        isLiveLocationActive: isActive,
+      ),
+    );
+  }
+
+  Message? _messageById(String messageId) {
+    for (final message in state.messages) {
+      if (message.id == messageId) return message;
+    }
+    return null;
+  }
+
+  void _replaceMessageInState(Message updatedMessage) {
+    final index = state.messages.indexWhere((m) => m.id == updatedMessage.id);
+    if (index == -1 || isClosed) return;
+
+    final updatedMessages = List<Message>.from(state.messages);
+    updatedMessages[index] = updatedMessage;
+    emit(state.copyWith(messages: updatedMessages));
+  }
+
+  Future<String> _resolveAddress(double latitude, double longitude) async {
+    try {
+      final placemarks = await placemarkFromCoordinates(latitude, longitude);
+      if (placemarks.isEmpty) {
+        return _formatCoordinates(latitude, longitude);
+      }
+      final placemark = placemarks.first;
+      final parts =
+          [
+                placemark.street,
+                placemark.subLocality,
+                placemark.locality,
+                placemark.administrativeArea,
+              ]
+              .whereType<String>()
+              .map((part) => part.trim())
+              .where((part) => part.isNotEmpty)
+              .toSet()
+              .toList();
+
+      return parts.isEmpty
+          ? _formatCoordinates(latitude, longitude)
+          : parts.join(', ');
+    } catch (_) {
+      return _formatCoordinates(latitude, longitude);
+    }
+  }
+
+  Future<String> _resolveLocationName(double latitude, double longitude) async {
+    try {
+      final placemarks = await placemarkFromCoordinates(latitude, longitude);
+      if (placemarks.isEmpty) return 'Live location';
+
+      final placemark = placemarks.first;
+      final candidates = [
+        placemark.name,
+        placemark.street,
+        placemark.subLocality,
+        placemark.locality,
+      ];
+      for (final candidate in candidates) {
+        if (candidate != null && candidate.trim().isNotEmpty) {
+          return candidate.trim();
+        }
+      }
+    } catch (_) {}
+
+    return 'Live location';
+  }
+
+  String _formatCoordinates(double latitude, double longitude) {
+    return '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}';
+  }
+
   void _refreshChannelList() {
     try {
-      final chats = _repository.getChannel(state.selectedChannel?.id ?? '')
+      final chats = _repository
+          .getChannel(state.selectedChannel?.id ?? '')
           ?.let((ch) {
-        final allChats = state.channels.map((c) {
-          if (c.id == ch.id) return _repository.getChannel(c.id) ?? c;
-          return c;
-        }).toList();
-        allChats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
-        return allChats;
-      });
+            final allChats = state.channels.map((c) {
+              if (c.id == ch.id) return _repository.getChannel(c.id) ?? c;
+              return c;
+            }).toList();
+            allChats.sort(
+              (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
+            );
+            return allChats;
+          });
       if (chats != null && !isClosed) {
         emit(state.copyWith(channels: chats));
       }
@@ -265,7 +507,8 @@ class ChatCubit extends Cubit<ChatState> {
 
   void deleteChat(String channelId) {
     _repository.deleteChat(channelId);
-    final updated = List.of(state.channels)..removeWhere((c) => c.id == channelId);
+    final updated = List.of(state.channels)
+      ..removeWhere((c) => c.id == channelId);
     emit(state.copyWith(channels: updated));
   }
 
@@ -278,7 +521,13 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   void clearSelectedChannel() {
-    emit(state.copyWith(clearSelectedChannel: true, isTyping: false, isOnline: false));
+    emit(
+      state.copyWith(
+        clearSelectedChannel: true,
+        isTyping: false,
+        isOnline: false,
+      ),
+    );
   }
 
   @override
@@ -290,6 +539,9 @@ class ChatCubit extends Cubit<ChatState> {
       for (final timer in timers) {
         timer.cancel();
       }
+    }
+    for (final timer in _liveLocationTimers.values) {
+      timer.cancel();
     }
     return super.close();
   }

@@ -129,7 +129,11 @@ class ChatRepository {
     }
   }
 
-  Future<Message> sendImageMessage(String channelId, String imagePath, {String text = ''}) async {
+  Future<Message> sendImageMessage(
+    String channelId,
+    String imagePath, {
+    String text = '',
+  }) async {
     try {
       final message = Message(
         id: 'msg_${DateTime.now().millisecondsSinceEpoch}_image',
@@ -153,7 +157,11 @@ class ChatRepository {
     }
   }
 
-  Future<Message> sendVideoMessage(String channelId, String videoPath, {String text = ''}) async {
+  Future<Message> sendVideoMessage(
+    String channelId,
+    String videoPath, {
+    String text = '',
+  }) async {
     try {
       final message = Message(
         id: 'msg_${DateTime.now().millisecondsSinceEpoch}_video',
@@ -177,8 +185,52 @@ class ChatRepository {
     }
   }
 
+  Future<Message> sendLocationMessage(
+    String channelId, {
+    required double latitude,
+    required double longitude,
+    required String locationName,
+    required String locationAddress,
+    bool isLiveLocation = false,
+    bool isLiveLocationActive = false,
+    DateTime? liveLocationEndsAt,
+  }) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_location',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: locationAddress,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.location,
+        latitude: latitude,
+        longitude: longitude,
+        locationName: locationName,
+        locationAddress: locationAddress,
+        isLiveLocation: isLiveLocation,
+        isLiveLocationActive: isLiveLocationActive,
+        liveLocationEndsAt: liveLocationEndsAt,
+        liveLocationUpdatedAt: DateTime.now(),
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(
+        channelId,
+        isLiveLocation ? '\u{1F4CD} Live location' : '\u{1F4CD} Location',
+      );
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Message generateAutoReply(String channelId) {
-    final reply = AppConstants.autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
+    final reply = AppConstants
+        .autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
     final message = Message(
       id: 'msg_${DateTime.now().millisecondsSinceEpoch}_reply',
       channelId: channelId,
@@ -213,11 +265,39 @@ class ChatRepository {
   }
 
   void updateMessageReactions(
-      String messageId, Map<String, List<String>> reactions) {
+    String messageId,
+    Map<String, List<String>> reactions,
+  ) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == messageId);
     if (idx >= 0) {
       allMessages[idx] = allMessages[idx].copyWith(reactions: reactions);
+      _storageService.saveMessages(allMessages);
+    }
+  }
+
+  void updateLocationMessage(
+    String messageId, {
+    required double latitude,
+    required double longitude,
+    required String locationName,
+    required String locationAddress,
+    required DateTime liveLocationUpdatedAt,
+    bool? isLiveLocationActive,
+  }) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == messageId);
+    if (idx >= 0) {
+      allMessages[idx] = allMessages[idx].copyWith(
+        latitude: latitude,
+        longitude: longitude,
+        locationName: locationName,
+        locationAddress: locationAddress,
+        text: locationAddress,
+        liveLocationUpdatedAt: liveLocationUpdatedAt,
+        isLiveLocationActive:
+            isLiveLocationActive ?? allMessages[idx].isLiveLocationActive,
+      );
       _storageService.saveMessages(allMessages);
     }
   }

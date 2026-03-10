@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../screens/camera_screen.dart';
+import '../screens/location_share_screen.dart';
 import '../screens/media_preview_screen.dart';
 import 'gallery_picker.dart';
 
@@ -35,7 +36,7 @@ class _AttachmentSheet extends StatelessWidget {
   const _AttachmentSheet({required this.channelId});
 
   // ── Callbacks ──────────────────────────────────────────
-  
+
   void _openGallery(BuildContext context) async {
     final PermissionState ps = await PhotoManager.requestPermissionExtend();
     if (ps.isAuth || ps.hasAccess) {
@@ -76,18 +77,24 @@ class _AttachmentSheet extends StatelessWidget {
     Navigator.pop(context); // Close attachment sheet
     Navigator.push(
       context,
+      MaterialPageRoute(builder: (_) => CameraScreen(channelId: channelId)),
+    );
+  }
+
+  void _shareLocation(BuildContext context) {
+    final navigator = Navigator.of(context);
+    navigator.pop();
+    navigator.push(
       MaterialPageRoute(
-        builder: (_) => CameraScreen(channelId: channelId),
+        builder: (_) => LocationShareScreen(channelId: channelId),
       ),
     );
   }
 
-  void _shareLocation() => debugPrint('Share Location');
   void _shareContact() => debugPrint('Share Contact');
   void _pickDocument() => debugPrint('Pick Document');
   void _pickAudio() => debugPrint('Pick Audio');
   void _createPoll() => debugPrint('Create Poll');
-
 
   @override
   Widget build(BuildContext context) {
@@ -108,7 +115,7 @@ class _AttachmentSheet extends StatelessWidget {
         icon: Icons.location_on,
         label: 'Location',
         color: const Color(0xFF25D366),
-        onTap: _shareLocation,
+        onTap: () => _shareLocation(context),
       ),
       AttachmentOption(
         icon: Icons.person,
@@ -150,7 +157,7 @@ class _AttachmentSheet extends StatelessWidget {
             width: 36,
             height: 4,
             decoration: BoxDecoration(
-              color: AppColors.iconMuted.withOpacity(0.4),
+              color: AppColors.iconMuted.withValues(alpha: 0.4),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -199,9 +206,10 @@ class _AttachmentOptionItemState extends State<AttachmentOptionItem>
       lowerBound: 0.0,
       upperBound: 0.1,
     );
-    _scaleAnim = Tween<double>(begin: 1.0, end: 0.88).animate(
-      CurvedAnimation(parent: _scaleCtrl, curve: Curves.easeInOut),
-    );
+    _scaleAnim = Tween<double>(
+      begin: 1.0,
+      end: 0.88,
+    ).animate(CurvedAnimation(parent: _scaleCtrl, curve: Curves.easeInOut));
   }
 
   @override
@@ -236,15 +244,15 @@ class _AttachmentOptionItemState extends State<AttachmentOptionItem>
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                color: opt.color.withOpacity(0.15),
+                color: opt.color.withValues(alpha: 0.15),
                 shape: BoxShape.circle,
                 border: Border.all(
-                  color: opt.color.withOpacity(0.25),
+                  color: opt.color.withValues(alpha: 0.25),
                   width: 1.2,
                 ),
                 boxShadow: [
                   BoxShadow(
-                    color: opt.color.withOpacity(0.20),
+                    color: opt.color.withValues(alpha: 0.20),
                     blurRadius: 10,
                     spreadRadius: 1,
                   ),

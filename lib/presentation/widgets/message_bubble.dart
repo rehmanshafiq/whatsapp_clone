@@ -9,6 +9,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'audio_message_bubble.dart';
+import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
 
 class MessageBubble extends StatelessWidget {
@@ -28,6 +29,8 @@ class MessageBubble extends StatelessWidget {
     Widget bubble;
     if (message.isAudio) {
       bubble = AudioMessageBubble(message: message);
+    } else if (message.isLocation) {
+      bubble = LocationMessageBubble(message: message);
     } else if (message.isImage) {
       bubble = _MediaMessageBubble(message: message, isSticker: false);
     } else if (message.isVideo) {
@@ -43,8 +46,9 @@ class MessageBubble extends StatelessWidget {
     return ChatMessageWrapper(
       messageId: message.id,
       controller: reactionsController,
-      alignment:
-          message.isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      alignment: message.isOutgoing
+          ? Alignment.centerRight
+          : Alignment.centerLeft,
       config: ChatReactionsConfig(
         availableReactions: const ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
         enableHapticFeedback: true,
@@ -63,8 +67,9 @@ class MessageBubble extends StatelessWidget {
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment:
-            message.isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+        crossAxisAlignment: message.isOutgoing
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.start,
         children: [
           bubble,
           if (message.reactions.isNotEmpty)
@@ -91,24 +96,19 @@ class _ReactionRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final totalCount =
-        reactions.values.fold<int>(0, (sum, list) => sum + list.length);
+    final totalCount = reactions.values.fold<int>(
+      0,
+      (sum, list) => sum + list.length,
+    );
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       decoration: BoxDecoration(
         color: AppColors.appBar,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: AppColors.chatBackground,
-          width: 1.5,
-        ),
+        border: Border.all(color: AppColors.chatBackground, width: 1.5),
         boxShadow: const [
-          BoxShadow(
-            color: Colors.black12,
-            blurRadius: 4,
-            offset: Offset(0, 1),
-          ),
+          BoxShadow(color: Colors.black12, blurRadius: 4, offset: Offset(0, 1)),
         ],
       ),
       child: Row(
@@ -161,7 +161,9 @@ class _TextMessageBubble extends StatelessWidget {
         ),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
+          color: isOutgoing
+              ? AppColors.outgoingBubble
+              : AppColors.incomingBubble,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(12),
             topRight: const Radius.circular(12),
@@ -232,12 +234,15 @@ class _MediaMessageBubble extends StatelessWidget {
           bottom: 2,
         ),
         padding: isSticker
-            ? EdgeInsets.zero // Stickers often don't have a background bubble
+            ? EdgeInsets
+                  .zero // Stickers often don't have a background bubble
             : const EdgeInsets.all(4),
         decoration: isSticker
             ? null
             : BoxDecoration(
-                color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
+                color: isOutgoing
+                    ? AppColors.outgoingBubble
+                    : AppColors.incomingBubble,
                 borderRadius: BorderRadius.only(
                   topLeft: const Radius.circular(12),
                   topRight: const Radius.circular(12),
@@ -263,18 +268,14 @@ class _MediaMessageBubble extends StatelessWidget {
                           height: isSticker ? 120 : 200,
                           color: AppColors.chatBackground,
                           child: const Center(
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                            ),
+                            child: CircularProgressIndicator(strokeWidth: 2),
                           ),
                         ),
                         errorWidget: (context, url, error) => Container(
                           width: isSticker ? 120 : 200,
                           height: isSticker ? 120 : 200,
                           color: AppColors.chatBackground,
-                          child: const Center(
-                            child: Icon(Icons.error_outline),
-                          ),
+                          child: const Center(child: Icon(Icons.error_outline)),
                         ),
                       )
                     : Image.file(
@@ -344,14 +345,14 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
   Future<void> _initVideo() async {
     final url = widget.message.mediaUrl;
     if (url == null) return;
-    
+
     try {
       if (url.startsWith('http')) {
         _controller = VideoPlayerController.networkUrl(Uri.parse(url));
       } else {
         _controller = VideoPlayerController.file(File(url));
       }
-      
+
       await _controller!.initialize();
       if (mounted) {
         setState(() => _initialized = true);
@@ -391,7 +392,9 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
         ),
         padding: const EdgeInsets.all(4),
         decoration: BoxDecoration(
-          color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
+          color: isOutgoing
+              ? AppColors.outgoingBubble
+              : AppColors.incomingBubble,
           borderRadius: BorderRadius.only(
             topLeft: const Radius.circular(12),
             topRight: const Radius.circular(12),
@@ -412,38 +415,38 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                       child: const Center(child: Icon(Icons.error_outline)),
                     )
                   : _initialized
-                      ? Stack(
-                          alignment: Alignment.center,
-                          children: [
-                            AspectRatio(
-                              aspectRatio: _controller!.value.aspectRatio,
-                              child: VideoPlayer(_controller!),
-                            ),
-                            GestureDetector(
-                              onTap: () {
-                                setState(() {
-                                  _controller!.value.isPlaying
-                                      ? _controller!.pause()
-                                      : _controller!.play();
-                                });
-                              },
-                              child: CircleAvatar(
-                                backgroundColor: Colors.black45,
-                                child: Icon(
-                                  _controller!.value.isPlaying
-                                      ? Icons.pause
-                                      : Icons.play_arrow,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      : Container(
-                          height: 200,
-                          color: Colors.black12,
-                          child: const Center(child: CircularProgressIndicator()),
+                  ? Stack(
+                      alignment: Alignment.center,
+                      children: [
+                        AspectRatio(
+                          aspectRatio: _controller!.value.aspectRatio,
+                          child: VideoPlayer(_controller!),
                         ),
+                        GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              _controller!.value.isPlaying
+                                  ? _controller!.pause()
+                                  : _controller!.play();
+                            });
+                          },
+                          child: CircleAvatar(
+                            backgroundColor: Colors.black45,
+                            child: Icon(
+                              _controller!.value.isPlaying
+                                  ? Icons.pause
+                                  : Icons.play_arrow,
+                              color: Colors.white,
+                            ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Container(
+                      height: 200,
+                      color: Colors.black12,
+                      child: const Center(child: CircularProgressIndicator()),
+                    ),
             ),
             if (widget.message.text.isNotEmpty)
               Padding(
