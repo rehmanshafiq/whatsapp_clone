@@ -20,16 +20,15 @@ class AppRouter {
           GoRoute(
             path: '/chats',
             name: chats,
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: ChatListScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const NoTransitionPage(child: ChatListScreen()),
             routes: [
               GoRoute(
                 path: ':id',
                 name: chatDetail,
                 pageBuilder: (context, state) {
                   final id = state.pathParameters['id']!;
-                  return MaterialPage(
+                  return NoTransitionPage(
                     key: state.pageKey,
                     child: ChatDetailScreen(channelId: id),
                   );
@@ -40,9 +39,8 @@ class AppRouter {
           GoRoute(
             path: '/contacts',
             name: contacts,
-            pageBuilder: (context, state) => const MaterialPage(
-              child: SelectContactScreen(),
-            ),
+            pageBuilder: (context, state) =>
+                const MaterialPage(child: SelectContactScreen()),
           ),
         ],
       ),
