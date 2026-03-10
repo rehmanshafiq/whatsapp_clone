@@ -394,7 +394,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           ),
           IconButton(
             icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
-            onPressed: () => showAttachmentSheet(context),
+            onPressed: () => showAttachmentSheet(context, widget.channelId),
           ),
           if (showCamera)
             IconButton(

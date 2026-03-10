@@ -1,5 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:photo_manager/photo_manager.dart';
 import '../../core/theme/app_theme.dart';
+import '../screens/camera_screen.dart';
+import '../screens/media_preview_screen.dart';
+import 'gallery_picker.dart';
 
 /// Data model for each attachment option in the grid.
 class AttachmentOption {
@@ -17,21 +21,67 @@ class AttachmentOption {
 }
 
 /// Shows the WhatsApp-style attachment bottom sheet.
-void showAttachmentSheet(BuildContext context) {
+void showAttachmentSheet(BuildContext context, String channelId) {
   showModalBottomSheet(
     context: context,
     backgroundColor: Colors.transparent,
     isScrollControlled: true,
-    builder: (_) => const _AttachmentSheet(),
+    builder: (_) => _AttachmentSheet(channelId: channelId),
   );
 }
 
 class _AttachmentSheet extends StatelessWidget {
-  const _AttachmentSheet();
+  final String channelId;
+  const _AttachmentSheet({required this.channelId});
 
-  // ── Placeholder callbacks ──────────────────────────────────────────
-  void _openGallery() => debugPrint('Open Gallery');
-  void _openCamera() => debugPrint('Open Camera');
+  // ── Callbacks ──────────────────────────────────────────
+  
+  void _openGallery(BuildContext context) async {
+    final PermissionState ps = await PhotoManager.requestPermissionExtend();
+    if (ps.isAuth || ps.hasAccess) {
+      if (!context.mounted) return;
+
+      // Close attachment sheet first
+      Navigator.pop(context);
+
+      showModalBottomSheet(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: Colors.transparent,
+        builder: (context) {
+          return GalleryPickerSheet(
+            onAssetSelected: (asset) async {
+              Navigator.pop(context);
+              final file = await asset.file;
+              if (file != null && context.mounted) {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => MediaPreviewScreen(
+                      channelId: channelId,
+                      mediaPath: file.path,
+                      isVideo: asset.type == AssetType.video,
+                    ),
+                  ),
+                );
+              }
+            },
+          );
+        },
+      );
+    }
+  }
+
+  void _openCamera(BuildContext context) {
+    Navigator.pop(context); // Close attachment sheet
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => CameraScreen(channelId: channelId),
+      ),
+    );
+  }
+
   void _shareLocation() => debugPrint('Share Location');
   void _shareContact() => debugPrint('Share Contact');
   void _pickDocument() => debugPrint('Pick Document');
@@ -46,13 +96,13 @@ class _AttachmentSheet extends StatelessWidget {
         icon: Icons.photo,
         label: 'Gallery',
         color: const Color(0xFF7C4DFF),
-        onTap: _openGallery,
+        onTap: () => _openGallery(context),
       ),
       AttachmentOption(
         icon: Icons.camera_alt,
         label: 'Camera',
         color: const Color(0xFFE91E63),
-        onTap: _openCamera,
+        onTap: () => _openCamera(context),
       ),
       AttachmentOption(
         icon: Icons.location_on,
