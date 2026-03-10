@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
 
@@ -30,7 +31,7 @@ class MessageBubble extends StatelessWidget {
     if (message.isAudio) {
       bubble = AudioMessageBubble(message: message);
     } else if (message.isLocation) {
-      bubble = LocationMessageBubble(message: message);
+      bubble = _LocationMessageWrapper(message: message);
     } else if (message.isImage) {
       bubble = _MediaMessageBubble(message: message, isSticker: false);
     } else if (message.isVideo) {
@@ -84,6 +85,55 @@ class MessageBubble extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _LocationMessageWrapper extends StatelessWidget {
+  final Message message;
+
+  const _LocationMessageWrapper({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: () => _openInMaps(context),
+      child: LocationMessageBubble(message: message),
+    );
+  }
+
+  Future<void> _openInMaps(BuildContext context) async {
+    final latitude = message.latitude;
+    final longitude = message.longitude;
+    if (latitude == null || longitude == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Location details are unavailable for this message.'),
+        ),
+      );
+      return;
+    }
+
+    final uri = Uri.parse(
+      'https://www.google.com/maps/search/?api=1&query=$latitude,$longitude',
+    );
+
+    try {
+      final launched = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open maps app.')),
+        );
+      }
+    } catch (_) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not open maps app.')),
+        );
+      }
+    }
   }
 }
 
