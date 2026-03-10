@@ -379,6 +379,23 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
     return '${latitude.toStringAsFixed(5)}, ${longitude.toStringAsFixed(5)}';
   }
 
+  Future<void> _centerOnCurrentLocation() async {
+    if (_currentPosition == null) {
+      await _initializeLocation();
+      if (_currentPosition == null) return;
+    }
+    final controller = _mapController;
+    if (controller == null) return;
+
+    final position = _currentPosition!;
+    await controller.animateCamera(
+      CameraUpdate.newLatLngZoom(
+        LatLng(position.latitude, position.longitude),
+        16,
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final currentPosition = _currentPosition;
@@ -444,6 +461,33 @@ class _LocationShareScreenState extends State<LocationShareScreen> {
                       child: CircularProgressIndicator(color: AppColors.accent),
                     ),
                   ),
+                Positioned(
+                  right: 16,
+                  bottom: 16,
+                  child: Material(
+                    color: Colors.transparent,
+                    shape: const CircleBorder(),
+                    elevation: 3,
+                    child: InkWell(
+                      onTap: _isLoading ? null : _centerOnCurrentLocation,
+                      customBorder: const CircleBorder(),
+                      child: Ink(
+                        width: 40,
+                        height: 40,
+                        decoration: BoxDecoration(
+                          color: AppColors.appBar,
+                          shape: BoxShape.circle,
+                          border: Border.all(color: AppColors.divider),
+                        ),
+                        child: const Icon(
+                          Icons.my_location_rounded,
+                          color: AppColors.textPrimary,
+                          size: 20,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
               ],
             ),
           ),
