@@ -7,9 +7,11 @@ import 'package:geolocator/geolocator.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/constants/app_constants.dart';
+import '../../core/network/api_exception.dart';
 import '../../data/models/message.dart';
 import '../../data/models/message_status.dart';
 import '../../data/models/user.dart';
+import '../../data/models/user_search.dart';
 import '../../data/repository/chat_repository.dart';
 import 'chat_state.dart';
 
@@ -21,6 +23,7 @@ class ChatCubit extends Cubit<ChatState> {
   final Map<String, Timer> _liveLocationTimers = {};
 
   ChatCubit(this._repository) : super(const ChatState());
+  ChatRepository get repository => _repository;
 
   Future<void> loadChats() async {
     emit(state.copyWith(isLoading: true, clearError: true));
@@ -28,8 +31,43 @@ class ChatCubit extends Cubit<ChatState> {
       final chats = await _repository.getChats();
       chats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
       emit(state.copyWith(channels: chats, isLoading: false));
+    } on ApiException catch (e) {
+      emit(state.copyWith(error: e.message, isLoading: false));
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isLoading: false));
+    }
+  }
+
+  Future<void> searchUsers(String query) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      emit(
+        state.copyWith(
+          userSearchResults: const <UserSearchResult>[],
+          isUserSearchLoading: false,
+          clearUserSearchError: true,
+        ),
+      );
+      return;
+    }
+
+    emit(state.copyWith(isUserSearchLoading: true, clearUserSearchError: true));
+    try {
+      final results = await _repository.searchUsers(trimmed);
+      emit(
+        state.copyWith(userSearchResults: results, isUserSearchLoading: false),
+      );
+    } on ApiException catch (e) {
+      emit(
+        state.copyWith(isUserSearchLoading: false, userSearchError: e.message),
+      );
+    } catch (e) {
+      emit(
+        state.copyWith(
+          isUserSearchLoading: false,
+          userSearchError: e.toString(),
+        ),
+      );
     }
   }
 

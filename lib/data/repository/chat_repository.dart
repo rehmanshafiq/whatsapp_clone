@@ -9,6 +9,8 @@ import '../models/chat_channel.dart';
 import '../models/message.dart';
 import '../models/message_status.dart';
 import '../models/user.dart';
+import '../models/user_search.dart';
+import '../services/web_socket_service.dart';
 import 'chat_remote_data_source.dart';
 
 export '../models/message.dart' show MessageType;
@@ -16,16 +18,27 @@ export '../models/message.dart' show MessageType;
 class ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
   final StorageService _storageService;
+  final WebSocketService _webSocketService;
   final _random = Random();
 
-  ChatRepository(this._remoteDataSource, this._storageService);
+  ChatRepository(
+    this._remoteDataSource,
+    this._storageService,
+    this._webSocketService,
+  );
 
   Future<List<ChatChannel>> getChats() async {
     try {
-      final localChats = _storageService.getChats();
-      if (localChats.isNotEmpty) return localChats;
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
 
-      final remoteChats = await _remoteDataSource.fetchChats();
+      await _webSocketService.connect(token: token);
+      final remoteChats = await _remoteDataSource.fetchChats(token: token);
       _storageService.saveChats(remoteChats);
       return remoteChats;
     } on ApiException {
@@ -63,6 +76,11 @@ class ChatRepository {
         status: MessageStatus.sending,
       );
 
+      _sendMessageOverSocket(
+        conversationId: channelId,
+        text: text,
+        timestamp: message.timestamp,
+      );
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
       _updateChannelLastMessage(channelId, text);
@@ -438,5 +456,94 @@ class ChatRepository {
     final chats = _storageService.getChats();
     final matches = chats.where((c) => c.id == channelId);
     return matches.isNotEmpty ? matches.first : null;
+  }
+
+  Future<List<UserSearchResult>> searchUsers(String username) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final baseResults = await _remoteDataSource.searchUsers(
+        token: token,
+        username: username,
+      );
+
+      if (baseResults.isEmpty) return baseResults;
+
+      final List<UserSearchResult> enriched = [];
+      for (final user in baseResults) {
+        try {
+          final withPresence = await _remoteDataSource.getUserPresence(
+            token: token,
+            userId: user.userId,
+            baseUser: user,
+          );
+          enriched.add(withPresence);
+        } on ApiException {
+          enriched.add(user);
+        }
+      }
+
+      return enriched;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<ChatChannel> createOrGetConversationForUser(
+    UserSearchResult user,
+  ) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final channel = await _remoteDataSource.createConversation(
+        token: token,
+        participantId: user.userId,
+      );
+
+      final chats = _storageService.getChats();
+      final idx = chats.indexWhere((c) => c.id == channel.id);
+      if (idx >= 0) {
+        chats[idx] = channel;
+      } else {
+        chats.insert(0, channel);
+      }
+      _storageService.saveChats(chats);
+      return channel;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  void _sendMessageOverSocket({
+    required String conversationId,
+    required String text,
+    required DateTime timestamp,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final payload = <String, dynamic>{
+      'conversation_id': conversationId,
+      'sender_id': AppConstants.currentUserId,
+      'message': text,
+      'timestamp': timestamp.toIso8601String(),
+    };
+
+    _webSocketService.send(payload);
   }
 }

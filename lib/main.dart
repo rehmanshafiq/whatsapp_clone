@@ -31,7 +31,7 @@ class WhatsAppClone extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return BlocProvider(
-      create: (_) => getIt<ChatCubit>()..loadChats(),
+      create: (_) => getIt<ChatCubit>(),
       child: MaterialApp.router(
         title: 'WhatsApp Clone',
         debugShowCheckedModeBanner: false,

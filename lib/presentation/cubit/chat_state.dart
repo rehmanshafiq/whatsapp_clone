@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import '../../data/models/chat_channel.dart';
 import '../../data/models/message.dart';
+import '../../data/models/user_search.dart';
 
 class ChatState extends Equatable {
   final List<ChatChannel> channels;
@@ -13,6 +14,9 @@ class ChatState extends Equatable {
   final bool isLoading;
   final String? error;
   final String searchQuery;
+  final List<UserSearchResult> userSearchResults;
+  final bool isUserSearchLoading;
+  final String? userSearchError;
 
   const ChatState({
     this.channels = const [],
@@ -24,6 +28,9 @@ class ChatState extends Equatable {
     this.isLoading = false,
     this.error,
     this.searchQuery = '',
+    this.userSearchResults = const [],
+    this.isUserSearchLoading = false,
+    this.userSearchError,
   });
 
   ChatState copyWith({
@@ -38,17 +45,28 @@ class ChatState extends Equatable {
     String? searchQuery,
     bool clearSelectedChannel = false,
     bool clearError = false,
+    List<UserSearchResult>? userSearchResults,
+    bool? isUserSearchLoading,
+    String? userSearchError,
+    bool clearUserSearchError = false,
   }) {
     return ChatState(
       channels: channels ?? this.channels,
       messages: messages ?? this.messages,
-      selectedChannel: clearSelectedChannel ? null : (selectedChannel ?? this.selectedChannel),
+      selectedChannel: clearSelectedChannel
+          ? null
+          : (selectedChannel ?? this.selectedChannel),
       isTyping: isTyping ?? this.isTyping,
       isOnline: isOnline ?? this.isOnline,
       isSending: isSending ?? this.isSending,
       isLoading: isLoading ?? this.isLoading,
       error: clearError ? null : (error ?? this.error),
       searchQuery: searchQuery ?? this.searchQuery,
+      userSearchResults: userSearchResults ?? this.userSearchResults,
+      isUserSearchLoading: isUserSearchLoading ?? this.isUserSearchLoading,
+      userSearchError: clearUserSearchError
+          ? null
+          : (userSearchError ?? this.userSearchError),
     );
   }
 
@@ -56,22 +74,24 @@ class ChatState extends Equatable {
     if (searchQuery.isEmpty) return channels;
     final query = searchQuery.toLowerCase();
     return channels
-        .where((c) =>
-            c.name.toLowerCase().contains(query) ||
-            c.lastMessage.toLowerCase().contains(query))
+        .where(
+          (c) =>
+              c.name.toLowerCase().contains(query) ||
+              c.lastMessage.toLowerCase().contains(query),
+        )
         .toList();
   }
 
   @override
   List<Object?> get props => [
-        channels,
-        messages,
-        selectedChannel,
-        isTyping,
-        isOnline,
-        isSending,
-        isLoading,
-        error,
-        searchQuery,
-      ];
+    channels,
+    messages,
+    selectedChannel,
+    isTyping,
+    isOnline,
+    isSending,
+    isLoading,
+    error,
+    searchQuery,
+  ];
 }
