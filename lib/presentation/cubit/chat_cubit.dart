@@ -1,10 +1,12 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:flutter_bloc/flutter_bloc.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
@@ -21,8 +23,13 @@ class ChatCubit extends Cubit<ChatState> {
   final Map<String, Timer> _replyTimers = {};
   final Map<String, List<Timer>> _statusTimers = {};
   final Map<String, Timer> _liveLocationTimers = {};
+  StreamSubscription<dynamic>? _socketSubscription;
 
-  ChatCubit(this._repository) : super(const ChatState());
+  ChatCubit(this._repository) : super(const ChatState()) {
+    _socketSubscription = _repository.socketMessages.listen(
+      _handleSocketMessage,
+    );
+  }
   ChatRepository get repository => _repository;
 
   Future<void> loadChats() async {
@@ -116,6 +123,77 @@ class ChatCubit extends Cubit<ChatState> {
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
+  }
+
+  void _handleSocketMessage(dynamic event) {
+    if (isClosed) return;
+
+    Map<String, dynamic>? data;
+    if (event is Map<String, dynamic>) {
+      data = event;
+    } else if (event is String) {
+      try {
+        final decoded = jsonDecode(event);
+        if (decoded is Map<String, dynamic>) {
+          data = decoded;
+        }
+      } catch (e) {
+        debugPrint('Failed to decode socket event: $e');
+        return;
+      }
+    } else {
+      return;
+    }
+
+    // Some backends wrap payload under "data" key.
+    if (data?['data'] is Map<String, dynamic>) {
+      data = data?['data'] as Map<String, dynamic>;
+    }
+
+    final conversationId =
+        (data?['conversation_id'] ?? data?['chat_id'] ?? data?['channel_id'])
+            as String?;
+    if (conversationId == null || conversationId.isEmpty) return;
+
+    final text =
+        (data?['message'] ?? data?['text'] ?? data?['last_message_text'])
+            as String? ??
+        '';
+    final timestampRaw =
+        data?['timestamp'] ??
+        data?['created_at'] ??
+        data?['sent_at'] ??
+        data?['last_message_at'];
+    DateTime timestamp;
+    if (timestampRaw is String) {
+      timestamp = DateTime.tryParse(timestampRaw)?.toLocal() ?? DateTime.now();
+    } else if (timestampRaw is int) {
+      timestamp = DateTime.fromMillisecondsSinceEpoch(
+        timestampRaw,
+        isUtc: true,
+      ).toLocal();
+    } else {
+      timestamp = DateTime.now();
+    }
+
+    final channels = List.of(state.channels);
+    final idx = channels.indexWhere((c) => c.id == conversationId);
+    if (idx == -1) {
+      return;
+    }
+
+    final current = channels[idx];
+    final isOpen = state.selectedChannel?.id == conversationId;
+    final updated = current.copyWith(
+      lastMessage: text.isNotEmpty ? text : current.lastMessage,
+      lastMessageTime: timestamp,
+      unreadCount: isOpen ? current.unreadCount : current.unreadCount + 1,
+    );
+
+    channels[idx] = updated;
+    channels.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+
+    emit(state.copyWith(channels: channels));
   }
 
   Future<void> sendAudioMessage(
@@ -634,6 +712,7 @@ class ChatCubit extends Cubit<ChatState> {
     for (final timer in _liveLocationTimers.values) {
       timer.cancel();
     }
+    _socketSubscription?.cancel();
     return super.close();
   }
 }

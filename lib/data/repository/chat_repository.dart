@@ -27,6 +27,8 @@ class ChatRepository {
     this._webSocketService,
   );
 
+  Stream<dynamic> get socketMessages => _webSocketService.messagesStream;
+
   Future<List<ChatChannel>> getChats() async {
     try {
       final token = _storageService.getToken();
