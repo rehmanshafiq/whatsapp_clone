@@ -12,6 +12,7 @@ import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
 import '../widgets/chat_list_item.dart';
 import '../widgets/shimmer_list.dart';
+import '../widgets/chat_avatar.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -231,21 +232,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   lastSeen: user.lastSeen,
                 );
                 return ListTile(
-                  leading: CircleAvatar(
-                    backgroundColor: AppColors.chatBackground,
-                    backgroundImage: user.avatarUrl.isNotEmpty
-                        ? NetworkImage(user.avatarUrl)
-                        : null,
-                    child: user.avatarUrl.isEmpty
-                        ? Text(
-                            user.displayName.isNotEmpty
-                                ? user.displayName[0].toUpperCase()
-                                : '?',
-                            style: const TextStyle(
-                              color: AppColors.textPrimary,
-                            ),
-                          )
-                        : null,
+                  leading: ChatAvatar(
+                    imageUrl: user.avatarUrl,
+                    name: user.displayName,
+                    radius: 24,
                   ),
                   title: Text(
                     user.displayName,

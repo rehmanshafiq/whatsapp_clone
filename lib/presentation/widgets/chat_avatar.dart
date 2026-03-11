@@ -1,5 +1,6 @@
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/theme/app_theme.dart';
 
@@ -27,15 +28,36 @@ class ChatAvatar extends StatelessWidget {
   }
 
   Widget _buildAvatar() {
-    if (imageUrl != null && imageUrl!.isNotEmpty) {
+    final url = imageUrl;
+    if (url != null && url.isNotEmpty) {
+      final isSvg = url.toLowerCase().contains('.svg');
+      if (isSvg) {
+        return CircleAvatar(
+          radius: radius,
+          backgroundColor: AppColors.chatBackground,
+          child: ClipOval(
+            child: SvgPicture.network(
+              url,
+              width: radius * 2,
+              height: radius * 2,
+              fit: BoxFit.cover,
+              placeholderBuilder: (_) =>
+                  _PlaceholderAvatar(name: name, radius: radius),
+            ),
+          ),
+        );
+      }
+
       return ClipOval(
         child: CachedNetworkImage(
-          imageUrl: imageUrl!,
+          imageUrl: url,
           width: radius * 2,
           height: radius * 2,
           fit: BoxFit.cover,
-          placeholder: (_, _) => _PlaceholderAvatar(name: name, radius: radius),
-          errorWidget: (_, _, _) => _PlaceholderAvatar(name: name, radius: radius),
+          placeholder: (context, url) =>
+              _PlaceholderAvatar(name: name, radius: radius),
+          errorWidget: (context, url, error) =>
+              _PlaceholderAvatar(name: name, radius: radius),
         ),
       );
     }
