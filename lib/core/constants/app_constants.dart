@@ -11,6 +11,10 @@ abstract class AppConstants {
   static const String storageChatsKey = 'chats';
   static const String storageMessagesKey = 'messages';
 
+  /// Auth storage keys
+  static const String storageTokenKey = 'token';
+  static const String storageUserIdKey = 'user_id';
+
   static const List<String> autoReplies = [
     'Sure, sounds good!',
     'I\'ll get back to you on that.',

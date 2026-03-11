@@ -46,4 +46,20 @@ class StorageService {
   void clearAll() {
     _box.erase();
   }
+
+  String? getToken() {
+    return _box.read<String>(AppConstants.storageTokenKey);
+  }
+
+  String? getUserId() {
+    return _box.read<String>(AppConstants.storageUserIdKey);
+  }
+
+  void saveAuth({
+    required String token,
+    required String userId,
+  }) {
+    _box.write(AppConstants.storageTokenKey, token);
+    _box.write(AppConstants.storageUserIdKey, userId);
+  }
 }
