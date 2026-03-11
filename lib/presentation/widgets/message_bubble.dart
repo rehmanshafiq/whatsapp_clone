@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter_contacts/flutter_contacts.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:video_player/video_player.dart';
 import 'dart:io';
@@ -30,6 +32,8 @@ class MessageBubble extends StatelessWidget {
     Widget bubble;
     if (message.isAudio) {
       bubble = AudioMessageBubble(message: message);
+    } else if (message.isContact) {
+      bubble = _ContactMessageBubble(message: message);
     } else if (message.isLocation) {
       bubble = _LocationMessageWrapper(message: message);
     } else if (message.isImage) {
@@ -83,6 +87,285 @@ class MessageBubble extends StatelessWidget {
               child: _ReactionRow(reactions: message.reactions),
             ),
         ],
+      ),
+    );
+  }
+}
+
+class _ContactMessageBubble extends StatelessWidget {
+  final Message message;
+
+  const _ContactMessageBubble({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final isOutgoing = message.isOutgoing;
+    final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
+    final hourRaw = message.timestamp.hour % 12;
+    final time =
+        '${hourRaw == 0 ? 12 : hourRaw}:${message.timestamp.minute.toString().padLeft(2, '0')} $period';
+
+    final name = message.contactName ?? 'Unknown';
+    final phone = message.contactPhone ?? '';
+
+    return Align(
+      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: () =>
+            _showContactActions(context, name, phone, message.contactId),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.78,
+          ),
+          margin: EdgeInsets.only(
+            left: isOutgoing ? 64 : 8,
+            right: isOutgoing ? 8 : 64,
+            top: 2,
+            bottom: 2,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            color: isOutgoing
+                ? AppColors.outgoingBubble
+                : AppColors.incomingBubble,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+              bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  _ContactThumb(message: message),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 15,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          phone,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 13,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 9),
+              Divider(
+                height: 1,
+                color: AppColors.divider.withValues(alpha: 0.5),
+              ),
+              const SizedBox(height: 8),
+              const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.message_outlined,
+                    size: 16,
+                    color: AppColors.accent,
+                  ),
+                  SizedBox(width: 6),
+                  Text(
+                    'Message',
+                    style: TextStyle(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      time,
+                      style: TextStyle(
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
+                        fontSize: 11,
+                      ),
+                    ),
+                    if (isOutgoing) ...[
+                      const SizedBox(width: 4),
+                      MessageStatusIcon(status: message.status, size: 14),
+                    ],
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showContactActions(
+    BuildContext context,
+    String name,
+    String phone,
+    String? contactId,
+  ) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.appBar,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(
+                  Icons.open_in_new,
+                  color: AppColors.textPrimary,
+                ),
+                title: const Text(
+                  'Open contact',
+                  style: TextStyle(color: AppColors.textPrimary),
+                ),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _openContact(context, contactId, phone);
+                },
+              ),
+              ListTile(
+                leading: const Icon(
+                  Icons.save_alt,
+                  color: AppColors.textPrimary,
+                ),
+                title: const Text(
+                  'Save to contacts',
+                  style: TextStyle(color: AppColors.textPrimary),
+                ),
+                onTap: () async {
+                  Navigator.of(ctx).pop();
+                  await _saveContact(context, name, phone);
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _openContact(
+    BuildContext context,
+    String? contactId,
+    String phone,
+  ) async {
+    try {
+      if (contactId != null && contactId.isNotEmpty) {
+        await FlutterContacts.openExternalView(contactId);
+        return;
+      }
+
+      final launched = await launchUrl(
+        Uri(scheme: 'tel', path: phone),
+        mode: LaunchMode.externalApplication,
+      );
+      if (!launched && context.mounted) {
+        _showSnackBar(context, 'Could not open contact.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        _showSnackBar(context, 'Could not open contact.');
+      }
+    }
+  }
+
+  Future<void> _saveContact(
+    BuildContext context,
+    String name,
+    String phone,
+  ) async {
+    try {
+      final hasPermission = await FlutterContacts.requestPermission(
+        readonly: false,
+      );
+      if (!hasPermission) {
+        if (context.mounted) {
+          _showSnackBar(context, 'Contacts permission denied.');
+        }
+        return;
+      }
+
+      final contact = Contact()
+        ..name.first = name
+        ..phones = [Phone(phone)];
+      await FlutterContacts.insertContact(contact);
+
+      if (context.mounted) {
+        _showSnackBar(context, 'Contact saved.');
+      }
+    } catch (_) {
+      if (context.mounted) {
+        _showSnackBar(context, 'Could not save contact.');
+      }
+    }
+  }
+
+  void _showSnackBar(BuildContext context, String text) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
+  }
+}
+
+class _ContactThumb extends StatelessWidget {
+  final Message message;
+
+  const _ContactThumb({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    final name = message.contactName ?? '';
+    final firstChar = name.trim().isNotEmpty
+        ? name.trim()[0].toUpperCase()
+        : '?';
+    final encoded = message.contactPhotoBase64;
+    if (encoded != null && encoded.isNotEmpty) {
+      try {
+        final bytes = base64Decode(encoded);
+        return CircleAvatar(radius: 21, backgroundImage: MemoryImage(bytes));
+      } catch (_) {}
+    }
+
+    return CircleAvatar(
+      radius: 21,
+      backgroundColor: AppColors.iconMuted.withValues(alpha: 0.28),
+      child: Text(
+        firstChar,
+        style: const TextStyle(
+          color: AppColors.textPrimary,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

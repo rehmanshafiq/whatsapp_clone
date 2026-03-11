@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../screens/camera_screen.dart';
+import '../screens/contact_picker_screen.dart';
 import '../screens/location_share_screen.dart';
 import '../screens/media_preview_screen.dart';
 import 'gallery_picker.dart';
@@ -91,7 +92,16 @@ class _AttachmentSheet extends StatelessWidget {
     );
   }
 
-  void _shareContact() => debugPrint('Share Contact');
+  void _shareContact(BuildContext context) {
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ContactPickerScreen(channelId: channelId),
+      ),
+    );
+  }
+
   void _pickDocument() => debugPrint('Pick Document');
   void _pickAudio() => debugPrint('Pick Audio');
   void _createPoll() => debugPrint('Create Poll');
@@ -121,7 +131,7 @@ class _AttachmentSheet extends StatelessWidget {
         icon: Icons.person,
         label: 'Contact',
         color: const Color(0xFF2196F3),
-        onTap: _shareContact,
+        onTap: () => _shareContact(context),
       ),
       AttachmentOption(
         icon: Icons.insert_drive_file,

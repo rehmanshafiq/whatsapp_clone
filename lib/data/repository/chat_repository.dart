@@ -1,4 +1,6 @@
 import 'dart:math';
+import 'dart:typed_data';
+import 'dart:convert';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
@@ -220,6 +222,39 @@ class ChatRepository {
         channelId,
         isLiveLocation ? '\u{1F4CD} Live location' : '\u{1F4CD} Location',
       );
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<Message> sendContactMessage(
+    String channelId, {
+    required String name,
+    required String phone,
+    String? contactId,
+    Uint8List? photo,
+  }) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_contact',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: '$name\n$phone',
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.contact,
+        contactId: contactId,
+        contactName: name,
+        contactPhone: phone,
+        contactPhotoBase64: photo != null ? base64Encode(photo) : null,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, '\u{1F464} $name');
       return message;
     } on ApiException {
       rethrow;

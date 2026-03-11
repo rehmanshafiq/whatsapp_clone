@@ -53,6 +53,8 @@
 	<string>This app requires access to your photo library to select media for chat messages.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>This app requires location access to share your current and live location in chats.</string>
+	<key>NSContactsUsageDescription</key>
+	<string>This app needs contacts access so you can share contacts in chats.</string>
 	<key>GMSApiKey</key>
 	<string>YOUR_GOOGLE_MAPS_API_KEY</string>
 </dict>

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -226,6 +227,33 @@ class ChatCubit extends Cubit<ChatState> {
       _scheduleAutoReply(channelId);
       _refreshChannelList();
       _scheduleLiveLocationUpdates(message, duration);
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  Future<void> sendContactMessage(
+    String channelId, {
+    required String name,
+    required String phone,
+    String? contactId,
+    Uint8List? photo,
+  }) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final message = await _repository.sendContactMessage(
+        channelId,
+        name: name,
+        phone: phone,
+        contactId: contactId,
+        photo: photo,
+      );
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
