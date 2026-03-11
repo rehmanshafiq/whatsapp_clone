@@ -12,19 +12,13 @@ import '../../presentation/cubit/chat_cubit.dart';
 import '../../presentation/cubit/contact_cubit.dart';
 import '../../presentation/cubit/auth_cubit.dart';
 import '../network/api_client.dart';
+import '../network/dio_api_client.dart';
 
 final getIt = GetIt.instance;
 
 void setupLocator() {
-  getIt.registerLazySingleton<Dio>(
-    () => Dio()
-      ..interceptors.add(
-        LogInterceptor(
-          requestBody: true,
-          responseBody: true,
-        ),
-      ),
-  );
+  getIt.registerLazySingleton<DioApiClient>(() => DioApiClient());
+  getIt.registerLazySingleton<Dio>(() => getIt<DioApiClient>().dio);
   getIt.registerLazySingleton<ApiClient>(() => ApiClient(getIt<Dio>()));
   getIt.registerLazySingleton<StorageService>(() => StorageService(GetStorage()));
   getIt.registerLazySingleton<AuthRemoteDataSource>(

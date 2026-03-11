@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
+import 'package:get_storage/get_storage.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../cubit/chat_cubit.dart';
@@ -36,6 +38,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
     });
   }
 
+  Future<void> _logout(BuildContext context) async {
+    final box = GetStorage();
+    await box.erase();
+    if (!mounted) return;
+    context.goNamed(AppRouter.auth);
+  }
+
   @override
   Widget build(BuildContext context) {
     final cubit = context.read<ChatCubit>();
@@ -63,7 +72,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 color: AppColors.iconMuted),
             onPressed: () => _toggleSearch(cubit),
           ),
-
+          IconButton(
+            icon: const Icon(Icons.logout, color: AppColors.iconMuted),
+            onPressed: () => _logout(context),
+            tooltip: 'Logout',
+          ),
         ],
       ),
       body: BlocBuilder<ChatCubit, ChatState>(

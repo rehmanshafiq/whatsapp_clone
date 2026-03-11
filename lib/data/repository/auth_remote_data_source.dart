@@ -9,7 +9,6 @@ class AuthRemoteDataSource {
 
   final Dio _dio;
 
-  static const String _baseUrl = 'https://chatapp-backend-0kxr.onrender.com';
   static const String _apiKey = 'chatapp-test-key';
 
   Future<void> register({
@@ -20,7 +19,7 @@ class AuthRemoteDataSource {
   }) async {
     try {
       await _dio.post<Map<String, dynamic>>(
-        '$_baseUrl/api/v1/app/users',
+        '/api/v1/app/users',
         data: <String, dynamic>{
           'username': username,
           'password': password,
@@ -58,7 +57,7 @@ class AuthRemoteDataSource {
   }) async {
     try {
       final response = await _dio.post<dynamic>(
-        '$_baseUrl/api/v1/auth/login',
+        '/api/v1/auth/login',
         data: <String, dynamic>{
           'username': username,
           'password': password,
