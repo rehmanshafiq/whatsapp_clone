@@ -148,12 +148,12 @@ class _AttachmentSheet extends StatelessWidget {
         color: const Color(0xFF7B1FA2),
         onTap: () => _pickDocument(context),
       ),
-      AttachmentOption(
-        icon: Icons.headphones,
-        label: 'Audio',
-        color: const Color(0xFFFF5722),
-        onTap: _pickAudio,
-      ),
+      // AttachmentOption(
+      //   icon: Icons.headphones,
+      //   label: 'Audio',
+      //   color: const Color(0xFFFF5722),
+      //   onTap: _pickAudio,
+      // ),
       AttachmentOption(
         icon: Icons.poll,
         label: 'Poll',
