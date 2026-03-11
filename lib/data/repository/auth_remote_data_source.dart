@@ -18,7 +18,7 @@ class AuthRemoteDataSource {
     required String? avatarUrl,
   }) async {
     try {
-      await _dio.post<Map<String, dynamic>>(
+      await _dio.post<dynamic>(
         '/api/v1/app/users',
         data: <String, dynamic>{
           'username': username,
@@ -27,6 +27,7 @@ class AuthRemoteDataSource {
           'avatar_url': avatarUrl,
         },
         options: Options(
+          responseType: ResponseType.plain,
           headers: const <String, String>{
             'Content-Type': 'application/json',
             'x-api-key': _apiKey,

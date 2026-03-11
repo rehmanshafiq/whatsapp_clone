@@ -4,25 +4,27 @@ import 'package:get_storage/get_storage.dart';
 
 import '../../data/local/audio_playback_service.dart';
 import '../../data/local/storage_service.dart';
-import '../../data/repository/chat_remote_data_source.dart';
 import '../../data/repository/auth_remote_data_source.dart';
 import '../../data/repository/auth_repository.dart';
+import '../../data/repository/chat_remote_data_source.dart';
 import '../../data/repository/chat_repository.dart';
 import '../../presentation/cubit/chat_cubit.dart';
 import '../../presentation/cubit/contact_cubit.dart';
 import '../../presentation/cubit/auth_cubit.dart';
-import '../network/api_client.dart';
 import '../network/dio_api_client.dart';
+import '../network/api_client.dart';
 
 final getIt = GetIt.instance;
 
 void setupLocator() {
+  // Auth / real backend client
   getIt.registerLazySingleton<DioApiClient>(() => DioApiClient());
-  getIt.registerLazySingleton<Dio>(() => getIt<DioApiClient>().dio);
-  getIt.registerLazySingleton<ApiClient>(() => ApiClient(getIt<Dio>()));
+
+  // Chat / mock API client retains its own Dio based on .env
+  getIt.registerLazySingleton<ApiClient>(() => ApiClient(Dio()));
   getIt.registerLazySingleton<StorageService>(() => StorageService(GetStorage()));
   getIt.registerLazySingleton<AuthRemoteDataSource>(
-    () => AuthRemoteDataSource(getIt<Dio>()),
+    () => AuthRemoteDataSource(getIt<DioApiClient>().dio),
   );
   getIt.registerLazySingleton<ChatRemoteDataSource>(
     () => ChatRemoteDataSource(getIt<ApiClient>()),
