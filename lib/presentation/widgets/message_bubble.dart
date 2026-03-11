@@ -12,6 +12,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'audio_message_bubble.dart';
+import 'document_message_bubble.dart';
 import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
 
@@ -44,6 +45,8 @@ class MessageBubble extends StatelessWidget {
       bubble = _MediaMessageBubble(message: message, isSticker: false);
     } else if (message.isSticker) {
       bubble = _MediaMessageBubble(message: message, isSticker: true);
+    } else if (message.isDocument) {
+      bubble = DocumentMessageBubble(message: message);
     } else {
       bubble = _TextMessageBubble(message: message);
     }

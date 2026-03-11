@@ -3,6 +3,7 @@ import 'package:photo_manager/photo_manager.dart';
 import '../../core/theme/app_theme.dart';
 import '../screens/camera_screen.dart';
 import '../screens/contact_picker_screen.dart';
+import '../screens/document_picker_screen.dart';
 import '../screens/location_share_screen.dart';
 import '../screens/media_preview_screen.dart';
 import 'gallery_picker.dart';
@@ -102,7 +103,15 @@ class _AttachmentSheet extends StatelessWidget {
     );
   }
 
-  void _pickDocument() => debugPrint('Pick Document');
+  void _pickDocument(BuildContext context) {
+    Navigator.pop(context);
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DocumentPickerScreen(channelId: channelId),
+      ),
+    );
+  }
   void _pickAudio() => debugPrint('Pick Audio');
   void _createPoll() => debugPrint('Create Poll');
 
@@ -137,7 +146,7 @@ class _AttachmentSheet extends StatelessWidget {
         icon: Icons.insert_drive_file,
         label: 'Document',
         color: const Color(0xFF7B1FA2),
-        onTap: _pickDocument,
+        onTap: () => _pickDocument(context),
       ),
       AttachmentOption(
         icon: Icons.headphones,

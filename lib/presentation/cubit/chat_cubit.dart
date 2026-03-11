@@ -259,6 +259,31 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  Future<void> sendDocumentMessage(
+    String channelId, {
+    required String filePath,
+    required String fileName,
+    required int fileSize,
+  }) async {
+    emit(state.copyWith(isSending: true));
+    try {
+      final message = await _repository.sendDocumentMessage(
+        channelId,
+        filePath: filePath,
+        fileName: fileName,
+        fileSize: fileSize,
+      );
+      final updatedMessages = List<Message>.from(state.messages)..add(message);
+      emit(state.copyWith(messages: updatedMessages, isSending: false));
+
+      _simulateMessageLifecycle(message);
+      _scheduleAutoReply(channelId);
+      _refreshChannelList();
+    } catch (e) {
+      emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
   void _simulateMessageLifecycle(Message message) {
     final timers = <Timer>[];
 

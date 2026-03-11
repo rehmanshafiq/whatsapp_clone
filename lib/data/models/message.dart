@@ -2,7 +2,7 @@ import 'package:equatable/equatable.dart';
 
 import 'message_status.dart';
 
-enum MessageType { text, audio, gif, sticker, image, video, location, contact }
+enum MessageType { text, audio, gif, sticker, image, video, location, contact, document }
 
 class Message extends Equatable {
   final String id;
@@ -27,6 +27,10 @@ class Message extends Equatable {
   final String? contactName;
   final String? contactPhone;
   final String? contactPhotoBase64;
+  /// For document messages: display name of the file.
+  final String? documentFileName;
+  /// For document messages: file size in bytes.
+  final int? documentFileSize;
   final Map<String, List<String>> reactions;
 
   const Message({
@@ -52,6 +56,8 @@ class Message extends Equatable {
     this.contactName,
     this.contactPhone,
     this.contactPhotoBase64,
+    this.documentFileName,
+    this.documentFileSize,
     this.reactions = const {},
   });
 
@@ -78,6 +84,8 @@ class Message extends Equatable {
     String? contactName,
     String? contactPhone,
     String? contactPhotoBase64,
+    String? documentFileName,
+    int? documentFileSize,
     Map<String, List<String>>? reactions,
   }) {
     return Message(
@@ -104,6 +112,8 @@ class Message extends Equatable {
       contactName: contactName ?? this.contactName,
       contactPhone: contactPhone ?? this.contactPhone,
       contactPhotoBase64: contactPhotoBase64 ?? this.contactPhotoBase64,
+      documentFileName: documentFileName ?? this.documentFileName,
+      documentFileSize: documentFileSize ?? this.documentFileSize,
       reactions: reactions ?? this.reactions,
     );
   }
@@ -131,6 +141,8 @@ class Message extends Equatable {
     'contactName': contactName,
     'contactPhone': contactPhone,
     'contactPhotoBase64': contactPhotoBase64,
+    'documentFileName': documentFileName,
+    'documentFileSize': documentFileSize,
     'reactions': reactions.map((k, v) => MapEntry(k, v)),
   };
 
@@ -165,6 +177,8 @@ class Message extends Equatable {
     contactName: json['contactName'] as String?,
     contactPhone: json['contactPhone'] as String?,
     contactPhotoBase64: json['contactPhotoBase64'] as String?,
+    documentFileName: json['documentFileName'] as String?,
+    documentFileSize: json['documentFileSize'] as int?,
     reactions:
         (json['reactions'] as Map<String, dynamic>?)?.map(
           (k, v) => MapEntry(k, List<String>.from(v as List)),
@@ -180,6 +194,7 @@ class Message extends Equatable {
   bool get isVideo => type == MessageType.video;
   bool get isLocation => type == MessageType.location;
   bool get isContact => type == MessageType.contact;
+  bool get isDocument => type == MessageType.document;
 
   @override
   List<Object?> get props => [
@@ -205,6 +220,8 @@ class Message extends Equatable {
     contactName,
     contactPhone,
     contactPhotoBase64,
+    documentFileName,
+    documentFileSize,
     reactions,
   ];
 }

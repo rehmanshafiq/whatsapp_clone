@@ -263,6 +263,37 @@ class ChatRepository {
     }
   }
 
+  Future<Message> sendDocumentMessage(
+    String channelId, {
+    required String filePath,
+    required String fileName,
+    required int fileSize,
+  }) async {
+    try {
+      final message = Message(
+        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_document',
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: '',
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: MessageType.document,
+        mediaUrl: filePath,
+        documentFileName: fileName,
+        documentFileSize: fileSize,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      _updateChannelLastMessage(channelId, '\u{1F4C4} $fileName');
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Message generateAutoReply(String channelId) {
     final reply = AppConstants
         .autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
