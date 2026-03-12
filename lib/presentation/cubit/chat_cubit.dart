@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
@@ -20,8 +19,6 @@ import 'chat_state.dart';
 
 class ChatCubit extends Cubit<ChatState> {
   final ChatRepository _repository;
-  final _random = Random();
-  final Map<String, Timer> _replyTimers = {};
   final Map<String, List<Timer>> _statusTimers = {};
   final Map<String, Timer> _liveLocationTimers = {};
   StreamSubscription<dynamic>? _socketSubscription;
@@ -156,7 +153,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -280,23 +276,32 @@ class ChatCubit extends Cubit<ChatState> {
     }
 
     // If the conversation is currently open, append the message to the
-    // messages list so the chat detail screen updates in real time too.
+    // messages list so the chat detail screen updates in real time.
     List<Message>? updatedMessages;
-    if (isOpen && !isOutgoing && text.isNotEmpty) {
-      final incomingMessage = Message(
+    if (isOpen && text.isNotEmpty) {
+      final rawSenderId = senderId ?? conversationId;
+      final myBackendId = _repository.getCurrentUserId();
+      final normalizedSenderId = (myBackendId != null &&
+              myBackendId.isNotEmpty &&
+              rawSenderId == myBackendId)
+          ? AppConstants.currentUserId
+          : rawSenderId;
+
+      final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
+            _stringFrom(data['id']) ??
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
-        senderId: senderId ?? conversationId,
+        senderId: normalizedSenderId,
         text: text,
         timestamp: timestamp,
-        status: MessageStatus.seen,
+        status: MessageStatus.sent,
       );
 
-      final alreadyExists = state.messages.any((m) => m.id == incomingMessage.id);
+      final alreadyExists = state.messages.any((m) => m.id == message.id);
       if (!alreadyExists) {
-        updatedMessages = List<Message>.from(state.messages)..add(incomingMessage);
+        updatedMessages = List<Message>.from(state.messages)..add(message);
       }
     }
 
@@ -334,7 +339,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -357,7 +361,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -380,7 +383,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -403,7 +405,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -430,7 +431,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -462,7 +462,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
       _scheduleLiveLocationUpdates(message, duration);
     } catch (e) {
@@ -490,7 +489,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -515,7 +513,6 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
       _simulateMessageLifecycle(message);
-      _scheduleAutoReply(channelId);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
@@ -555,44 +552,6 @@ class ChatCubit extends Cubit<ChatState> {
     if (!isClosed) {
       emit(state.copyWith(messages: updatedMessages));
     }
-  }
-
-  void _scheduleAutoReply(String channelId) {
-    _replyTimers[channelId]?.cancel();
-
-    final delay =
-        AppConstants.minReplyDelay +
-        Duration(
-          milliseconds: _random.nextInt(
-            AppConstants.maxReplyDelay.inMilliseconds -
-                AppConstants.minReplyDelay.inMilliseconds,
-          ),
-        );
-
-    if (!isClosed) {
-      emit(state.copyWith(isOnline: true));
-    }
-
-    final typingDelay = Duration(milliseconds: delay.inMilliseconds - 1500);
-    Timer(typingDelay > Duration.zero ? typingDelay : Duration.zero, () {
-      if (!isClosed) {
-        emit(state.copyWith(isTyping: true));
-      }
-    });
-
-    _replyTimers[channelId] = Timer(delay, () {
-      if (isClosed) return;
-      final reply = _repository.generateAutoReply(channelId);
-      final updatedMessages = List<Message>.from(state.messages)..add(reply);
-      emit(state.copyWith(messages: updatedMessages, isTyping: false));
-      _refreshChannelList();
-
-      Timer(const Duration(seconds: 2), () {
-        if (!isClosed) {
-          emit(state.copyWith(isOnline: false));
-        }
-      });
-    });
   }
 
   void _scheduleLiveLocationUpdates(Message message, Duration duration) {
@@ -823,9 +782,6 @@ class ChatCubit extends Cubit<ChatState> {
 
   @override
   Future<void> close() {
-    for (final timer in _replyTimers.values) {
-      timer.cancel();
-    }
     for (final timers in _statusTimers.values) {
       for (final timer in timers) {
         timer.cancel();

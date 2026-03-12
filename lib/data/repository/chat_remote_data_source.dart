@@ -222,7 +222,7 @@ class ChatRemoteDataSource {
       );
       final data = response.data;
       final list = _extractMessageList(data);
-      return list.map(_mapMessageFromApi).whereType<Message>().toList();
+      return list.map(_mapMessageFromApi).toList();
     } on DioException catch (e) {
       if (e.response?.statusCode == 404) return [];
       final statusCode = e.response?.statusCode;
@@ -440,21 +440,6 @@ class ChatRemoteDataSource {
     return null;
   }
 
-  List<Message> _generateMockMessages(String channelId) {
-    final now = DateTime.now();
-    return List.generate(20, (i) {
-      final isOutgoing = i % 3 != 0;
-      return Message(
-        id: '${channelId}_msg_$i',
-        channelId: channelId,
-        senderId: isOutgoing ? AppConstants.currentUserId : channelId,
-        text: _sampleTexts[i % _sampleTexts.length],
-        timestamp: now.subtract(Duration(minutes: (20 - i) * 5)),
-        status: isOutgoing ? MessageStatus.seen : MessageStatus.seen,
-      );
-    });
-  }
-
   List<User> _generateMockContacts() {
     return List.generate(AppConstants.contactNames.length, (i) {
       return User(
@@ -465,27 +450,4 @@ class ChatRemoteDataSource {
       );
     })..sort((a, b) => a.name.compareTo(b.name));
   }
-
-  static const _sampleTexts = [
-    'Hey, how are you?',
-    'I\'m doing great, thanks!',
-    'What are you up to?',
-    'Not much, just chilling.',
-    'Did you see the new update?',
-    'Yeah, it looks awesome!',
-    'Want to grab lunch?',
-    'Sure, where should we meet?',
-    'How about that place downtown?',
-    'Sounds good!',
-    'See you there at noon.',
-    'Perfect, see you then!',
-    'Don\'t forget to bring the documents.',
-    'Got it, I\'ll have them ready.',
-    'Thanks a lot!',
-    'No problem!',
-    'Have a great day!',
-    'You too!',
-    'Talk to you later.',
-    'Bye!',
-  ];
 }

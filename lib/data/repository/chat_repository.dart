@@ -1,4 +1,3 @@
-import 'dart:math';
 import 'dart:typed_data';
 import 'dart:convert';
 
@@ -19,7 +18,6 @@ class ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
   final StorageService _storageService;
   final WebSocketService _webSocketService;
-  final _random = Random();
 
   ChatRepository(
     this._remoteDataSource,
@@ -28,6 +26,10 @@ class ChatRepository {
   );
 
   Stream<dynamic> get socketMessages => _webSocketService.messagesStream;
+
+  /// Current user's id from backend (stored at login). Used to normalize
+  /// message senderId so UI can show sent (right) vs received (left).
+  String? getCurrentUserId() => _storageService.getUserId();
 
   Future<List<ChatChannel>> getChats() async {
     try {
@@ -52,9 +54,6 @@ class ChatRepository {
 
   Future<List<Message>> getMessages(String channelId) async {
     try {
-      final localMessages = _storageService.getMessagesForChannel(channelId);
-      if (localMessages.isNotEmpty) return localMessages;
-
       final token = _storageService.getToken();
       if (token == null || token.isEmpty) {
         throw const ApiException(
@@ -64,15 +63,30 @@ class ChatRepository {
       }
       final remoteMessages =
           await _remoteDataSource.fetchMessages(channelId, token: token);
+      final normalized = _normalizeMessageSenderIds(remoteMessages);
       final allMessages = _storageService.getMessages();
-      allMessages.addAll(remoteMessages);
+      allMessages.removeWhere((m) => m.channelId == channelId);
+      allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
-      return remoteMessages;
+      return normalized;
     } on ApiException {
       rethrow;
     } catch (e) {
       throw ApiException(message: e.toString());
     }
+  }
+
+  /// Ensures messages from the current user have senderId == AppConstants.currentUserId
+  /// so Message.isOutgoing (senderId == 'me') shows bubbles on the right.
+  List<Message> _normalizeMessageSenderIds(List<Message> messages) {
+    final myId = _storageService.getUserId();
+    if (myId == null || myId.isEmpty) return messages;
+    return messages
+        .map((m) =>
+            m.senderId == myId
+                ? m.copyWith(senderId: AppConstants.currentUserId)
+                : m)
+        .toList();
   }
 
   /// Fetches messages for [channelId] from the server and updates local
@@ -84,12 +98,13 @@ class ChatRepository {
 
       final remoteMessages =
           await _remoteDataSource.fetchMessages(channelId, token: token);
+      final normalized = _normalizeMessageSenderIds(remoteMessages);
       final allMessages = _storageService.getMessages();
       allMessages.removeWhere((m) => m.channelId == channelId);
-      allMessages.addAll(remoteMessages);
+      allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
-      remoteMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-      return remoteMessages;
+      normalized.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      return normalized;
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -344,22 +359,6 @@ class ChatRepository {
     }
   }
 
-  Message generateAutoReply(String channelId) {
-    final reply = AppConstants
-        .autoReplies[_random.nextInt(AppConstants.autoReplies.length)];
-    final message = Message(
-      id: 'msg_${DateTime.now().millisecondsSinceEpoch}_reply',
-      channelId: channelId,
-      senderId: channelId,
-      text: reply,
-      timestamp: DateTime.now(),
-      status: MessageStatus.seen,
-    );
-    _persistMessage(message);
-    updateChannelLastMessage(channelId, reply);
-    return message;
-  }
-
   void _persistMessage(Message message) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == message.id);
@@ -569,11 +568,16 @@ class ChatRepository {
   }) {
     if (!_webSocketService.isConnected) return;
 
+    // Backend expects event-based format so it can broadcast to the other participant.
     final payload = <String, dynamic>{
-      'conversation_id': conversationId,
-      'sender_id': AppConstants.currentUserId,
-      'message': text,
-      'timestamp': timestamp.toIso8601String(),
+      'event': 'send_message',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'sender_id': AppConstants.currentUserId,
+        'body': text,
+        'message': text,
+        'timestamp': timestamp.toIso8601String(),
+      },
     };
 
     _webSocketService.send(payload);

@@ -100,24 +100,31 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<ChatCubit, ChatState>(
+      // Rebuild when messages change (e.g. new socket message) or loading state.
+      buildWhen: (prev, curr) =>
+          prev.messages != curr.messages ||
+          prev.selectedChannel != curr.selectedChannel ||
+          prev.isLoading != curr.isLoading,
       // Also fire when loading finishes so the initial load scrolls correctly.
       listenWhen: (prev, curr) =>
-      prev.messages.length != curr.messages.length ||
+          prev.messages.length != curr.messages.length ||
           (prev.isLoading && !curr.isLoading && curr.messages.isNotEmpty),
       listener: (_, state) {
-        _syncReactions(state.messages);
-        // With reverse: true the list already starts at the bottom on first
-        // load, but we still call _scrollToBottom so newly arrived messages
-        // snap into view if the user isn't already there.
-        _scrollToBottom(animate: state.messages.length > 1);
+        final forThisChat = state.messages
+            .where((m) => m.channelId == widget.channelId)
+            .toList();
+        _syncReactions(forThisChat);
+        _scrollToBottom(animate: forThisChat.length > 1);
       },
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
 
-        // Build a reversed view of messages so index 0 == latest message.
-        // The ListView with reverse:true renders index 0 at the very bottom.
-        final reversedMessages = state.messages.reversed.toList();
+        // Only show messages for this conversation (handles socket updates).
+        final messagesForThisChat = state.messages
+            .where((m) => m.channelId == widget.channelId)
+            .toList();
+        final reversedMessages = messagesForThisChat.reversed.toList();
 
         return PopScope(
           onPopInvokedWithResult: (didPop, _) {
@@ -182,8 +189,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 Column(
                   children: [
                     Expanded(
-                      child: state.isLoading && state.messages.isEmpty
-                          ? const Center(
+                      child: state.isLoading && messagesForThisChat.isEmpty
+                              ? const Center(
                               child: CircularProgressIndicator(
                                   color: AppColors.accent))
                           : ListView.builder(
