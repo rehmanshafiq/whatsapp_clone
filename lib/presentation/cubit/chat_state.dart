@@ -93,5 +93,8 @@ class ChatState extends Equatable {
     isLoading,
     error,
     searchQuery,
+    userSearchResults,
+    isUserSearchLoading,
+    userSearchError,
   ];
 }

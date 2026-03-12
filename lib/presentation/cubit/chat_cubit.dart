@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
+import '../../data/models/chat_channel.dart';
 import '../../data/models/message.dart';
 import '../../data/models/message_status.dart';
 import '../../data/models/user.dart';
@@ -28,7 +29,12 @@ class ChatCubit extends Cubit<ChatState> {
   ChatCubit(this._repository) : super(const ChatState()) {
     _socketSubscription = _repository.socketMessages.listen(
       _handleSocketMessage,
+      onError: (Object e, StackTrace st) {
+        debugPrint('[ChatCubit] Socket stream error: $e');
+      },
+      cancelOnError: false,
     );
+    debugPrint('[ChatCubit] Subscribed to socket stream');
   }
   ChatRepository get repository => _repository;
 
@@ -42,6 +48,19 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(error: e.message, isLoading: false));
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isLoading: false));
+    }
+  }
+
+  /// Fetches conversations from the server and updates the list without
+  /// showing loading. Use for polling when the backend does not push over WebSocket.
+  Future<void> refreshChatList() async {
+    if (isClosed) return;
+    try {
+      final chats = await _repository.getChats();
+      chats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+      if (!isClosed) emit(state.copyWith(channels: chats));
+    } catch (_) {
+      // Silent fail for background refresh
     }
   }
 
@@ -108,6 +127,25 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Polls the server for new messages in [channelId] and updates state.
+  /// Use when WebSocket does not push (e.g. backend only echoes to sender).
+  Future<void> refreshMessages(String channelId) async {
+    if (isClosed) return;
+    try {
+      final messages =
+          await _repository.refreshMessagesFromServer(channelId);
+      if (!isClosed && state.selectedChannel?.id == channelId) {
+        final updatedChats = await _repository.getChats();
+        updatedChats.sort(
+          (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
+        );
+        emit(state.copyWith(messages: messages, channels: updatedChats));
+      }
+    } catch (_) {
+      // Silent fail for background refresh
+    }
+  }
+
   Future<void> sendMessage(String channelId, String text) async {
     if (text.trim().isEmpty) return;
 
@@ -126,44 +164,72 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   void _handleSocketMessage(dynamic event) {
+    debugPrint('[ChatCubit] _handleSocketMessage called (isClosed=$isClosed)');
     if (isClosed) return;
 
-    Map<String, dynamic>? data;
+    Map<String, dynamic>? raw;
     if (event is Map<String, dynamic>) {
-      data = event;
+      raw = event;
     } else if (event is String) {
       try {
         final decoded = jsonDecode(event);
         if (decoded is Map<String, dynamic>) {
-          data = decoded;
+          raw = decoded;
         }
       } catch (e) {
-        debugPrint('Failed to decode socket event: $e');
+        debugPrint('[ChatCubit] Failed to decode socket event: $e');
         return;
       }
     } else {
+      debugPrint('[ChatCubit] Ignoring non-Map event: ${event.runtimeType}');
       return;
     }
 
-    // Some backends wrap payload under "data" key.
-    if (data?['data'] is Map<String, dynamic>) {
-      data = data?['data'] as Map<String, dynamic>;
+    if (raw == null) return;
+
+    // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
+    final eventType = _stringFrom(raw['event']);
+    if (eventType == 'ping' || eventType == 'pong') return;
+    if (eventType == 'typing_start' || eventType == 'typing_stop') {
+      _handleTypingEvent(eventType!, raw);
+      return;
     }
 
-    final conversationId =
-        (data?['conversation_id'] ?? data?['chat_id'] ?? data?['channel_id'])
-            as String?;
-    if (conversationId == null || conversationId.isEmpty) return;
+    // Only process message events (send_message, new_message, or legacy payload without event)
+    final isMessageEvent = eventType == null ||
+        eventType == 'send_message' ||
+        eventType == 'new_message' ||
+        eventType == 'message';
+    if (!isMessageEvent) return;
 
-    final text =
-        (data?['message'] ?? data?['text'] ?? data?['last_message_text'])
-            as String? ??
+    Map<String, dynamic> data = raw;
+    if (raw['data'] is Map<String, dynamic>) {
+      data = raw['data'] as Map<String, dynamic>;
+    } else if (raw['payload'] is Map<String, dynamic>) {
+      data = raw['payload'] as Map<String, dynamic>;
+    }
+
+    final conversationId = _stringFrom(data['conversation_id']) ??
+        _stringFrom(data['chat_id']) ??
+        _stringFrom(data['channel_id']);
+    if (conversationId == null || conversationId.isEmpty) {
+      debugPrint('[ChatCubit] No conversation_id in payload. Keys: ${data.keys.toList()}');
+      return;
+    }
+
+    debugPrint('[ChatCubit] Socket message for conversation: $conversationId');
+
+    // Backend sends message text in "body" for send_message
+    final text = _stringFrom(data['body']) ??
+        _stringFrom(data['message']) ??
+        _stringFrom(data['text']) ??
+        _stringFrom(data['last_message_text']) ??
         '';
-    final timestampRaw =
-        data?['timestamp'] ??
-        data?['created_at'] ??
-        data?['sent_at'] ??
-        data?['last_message_at'];
+    final timestampRaw = data['timestamp'] ??
+        data['created_at'] ??
+        data['sent_at'] ??
+        data['last_message_at'] ??
+        raw['timestamp'];
     DateTime timestamp;
     if (timestampRaw is String) {
       timestamp = DateTime.tryParse(timestampRaw)?.toLocal() ?? DateTime.now();
@@ -176,24 +242,80 @@ class ChatCubit extends Cubit<ChatState> {
       timestamp = DateTime.now();
     }
 
-    final channels = List.of(state.channels);
+    // peer_user_id = recipient. When it equals currentUserId, we're the recipient (incoming).
+    final peerUserId = _stringFrom(data['peer_user_id']);
+    final senderId = _stringFrom(data['sender_id']) ?? _stringFrom(data['from_user_id']);
+    final isOutgoing = peerUserId != null && peerUserId != AppConstants.currentUserId;
+    final isOpen = state.selectedChannel?.id == conversationId;
+
+    final channels = List<ChatChannel>.of(state.channels);
     final idx = channels.indexWhere((c) => c.id == conversationId);
     if (idx == -1) {
+      debugPrint('[ChatCubit] Conversation $conversationId not in local list, reloading...');
+      loadChats();
       return;
     }
 
     final current = channels[idx];
-    final isOpen = state.selectedChannel?.id == conversationId;
+
+    int unread = current.unreadCount;
+    if (!isOpen && !isOutgoing) {
+      unread = unread + 1;
+      _repository.incrementUnread(conversationId);
+    }
+
+    final displayText = text.isNotEmpty ? text : current.lastMessage;
     final updated = current.copyWith(
-      lastMessage: text.isNotEmpty ? text : current.lastMessage,
+      lastMessage: displayText,
       lastMessageTime: timestamp,
-      unreadCount: isOpen ? current.unreadCount : current.unreadCount + 1,
+      unreadCount: isOpen ? 0 : unread,
     );
 
     channels[idx] = updated;
     channels.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
 
-    emit(state.copyWith(channels: channels));
+    // Persist the channel update so _refreshChannelList stays in sync.
+    if (text.isNotEmpty) {
+      _repository.updateChannelLastMessage(conversationId, displayText);
+    }
+
+    // If the conversation is currently open, append the message to the
+    // messages list so the chat detail screen updates in real time too.
+    List<Message>? updatedMessages;
+    if (isOpen && !isOutgoing && text.isNotEmpty) {
+      final incomingMessage = Message(
+        id: _stringFrom(data['client_msg_id']) ??
+            _stringFrom(data['message_id']) ??
+            'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
+        channelId: conversationId,
+        senderId: senderId ?? conversationId,
+        text: text,
+        timestamp: timestamp,
+        status: MessageStatus.seen,
+      );
+
+      final alreadyExists = state.messages.any((m) => m.id == incomingMessage.id);
+      if (!alreadyExists) {
+        updatedMessages = List<Message>.from(state.messages)..add(incomingMessage);
+      }
+    }
+
+    debugPrint('[ChatCubit] Emitting updated channels (count: ${channels.length})');
+    emit(state.copyWith(
+      channels: channels,
+      messages: updatedMessages,
+    ));
+  }
+
+  void _handleTypingEvent(String eventType, Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null || state.selectedChannel?.id != conversationId) return;
+    final isTyping = eventType == 'typing_start';
+    emit(state.copyWith(isTyping: isTyping));
   }
 
   Future<void> sendAudioMessage(
@@ -714,6 +836,12 @@ class ChatCubit extends Cubit<ChatState> {
     }
     _socketSubscription?.cancel();
     return super.close();
+  }
+
+  static String? _stringFrom(dynamic v) {
+    if (v == null) return null;
+    if (v is String) return v.isEmpty ? null : v;
+    return v.toString();
   }
 }
 

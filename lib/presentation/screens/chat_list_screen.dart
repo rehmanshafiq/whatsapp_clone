@@ -25,18 +25,26 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _isSearching = false;
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
+  Timer? _pollTimer;
+  static const _pollInterval = Duration(seconds: 1);
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      context.read<ChatCubit>().loadChats();
+      final cubit = context.read<ChatCubit>();
+      cubit.loadChats();
+      _pollTimer = Timer.periodic(_pollInterval, (_) {
+        if (!mounted) return;
+        context.read<ChatCubit>().refreshChatList();
+      });
     });
   }
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -142,6 +150,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ],
       ),
       body: BlocBuilder<ChatCubit, ChatState>(
+        buildWhen: (previous, current) =>
+            previous.channels != current.channels ||
+            previous.isLoading != current.isLoading ||
+            previous.error != current.error ||
+            previous.searchQuery != current.searchQuery ||
+            previous.userSearchResults != current.userSearchResults ||
+            previous.isUserSearchLoading != current.isUserSearchLoading ||
+            previous.userSearchError != current.userSearchError,
         builder: (context, state) {
           if (state.isLoading && state.channels.isEmpty) {
             return const ShimmerChatList();

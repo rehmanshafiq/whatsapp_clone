@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../../core/network/api_exception.dart';
@@ -103,7 +104,17 @@ class WebSocketService {
         parsedMessage = message;
       }
     }
+    debugPrint('[WebSocket] Received: ${parsedMessage.runtimeType} ${_summarize(parsedMessage)}');
     _messagesController.add(parsedMessage);
+  }
+
+  static String _summarize(dynamic o) {
+    if (o is Map) {
+      final keys = o.keys.take(8).join(', ');
+      return '{$keys}';
+    }
+    if (o is String) return o.length > 80 ? '${o.substring(0, 80)}...' : o;
+    return o.toString();
   }
 
   void _onSocketError(Object _) {

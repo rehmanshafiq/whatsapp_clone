@@ -206,16 +206,93 @@ class ChatRemoteDataSource {
     }
   }
 
-  Future<List<Message>> fetchMessages(String channelId) async {
+  Future<List<Message>> fetchMessages(
+    String channelId, {
+    required String token,
+  }) async {
     try {
-      await Future.delayed(const Duration(milliseconds: 500));
-      return _generateMockMessages(channelId);
-    } catch (e) {
-      throw const ApiException(
-        message: 'Failed to fetch messages',
-        statusCode: 500,
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/conversations/$channelId/messages',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
       );
+      final data = response.data;
+      final list = _extractMessageList(data);
+      return list.map(_mapMessageFromApi).whereType<Message>().toList();
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) return [];
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to fetch messages';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } catch (e) {
+      throw ApiException(message: e.toString());
     }
+  }
+
+  List<Map<String, dynamic>> _extractMessageList(dynamic data) {
+    if (data is List) {
+      return data.whereType<Map<String, dynamic>>().toList();
+    }
+    if (data is Map<String, dynamic>) {
+      final list = data['data'] ?? data['messages'] ?? data['items'];
+      if (list is List) {
+        return list.whereType<Map<String, dynamic>>().toList();
+      }
+    }
+    return [];
+  }
+
+  Message _mapMessageFromApi(Map<String, dynamic> json) {
+    final id = _asString(json['id']) ?? _asString(json['message_id']) ?? '';
+    final channelId = _asString(json['conversation_id']) ??
+        _asString(json['channel_id']) ??
+        _asString(json['channelId']) ??
+        '';
+    final senderId = _asString(json['sender_id']) ??
+        _asString(json['user_id']) ??
+        _asString(json['from_user_id']) ??
+        _asString(json['senderId']) ??
+        '';
+    final text = _asString(json['text']) ??
+        _asString(json['message']) ??
+        _asString(json['content']) ??
+        _asString(json['body']) ??
+        '';
+    final ts = _asDateTime(json['timestamp']) ??
+        _asDateTime(json['created_at']) ??
+        _asDateTime(json['sent_at']) ??
+        _asDateTime(json['last_message_at']) ??
+        DateTime.now();
+    final statusStr = _asString(json['status'])?.toLowerCase();
+    MessageStatus status = MessageStatus.sent;
+    if (statusStr == 'sending') status = MessageStatus.sending;
+    if (statusStr == 'delivered') status = MessageStatus.delivered;
+    if (statusStr == 'seen' || statusStr == 'read') status = MessageStatus.seen;
+    if (json['status'] is int) {
+      final i = json['status'] as int;
+      if (i >= 0 && i < MessageStatus.values.length) {
+        status = MessageStatus.values[i];
+      }
+    }
+    return Message(
+      id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
+      channelId: channelId,
+      senderId: senderId,
+      text: text,
+      timestamp: ts,
+      status: status,
+    );
   }
 
   Future<Message> sendMessage(Message message) async {

@@ -55,10 +55,40 @@ class ChatRepository {
       final localMessages = _storageService.getMessagesForChannel(channelId);
       if (localMessages.isNotEmpty) return localMessages;
 
-      final remoteMessages = await _remoteDataSource.fetchMessages(channelId);
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final remoteMessages =
+          await _remoteDataSource.fetchMessages(channelId, token: token);
       final allMessages = _storageService.getMessages();
       allMessages.addAll(remoteMessages);
       _storageService.saveMessages(allMessages);
+      return remoteMessages;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Fetches messages for [channelId] from the server and updates local
+  /// storage. Use for polling so new messages appear without WebSocket.
+  Future<List<Message>> refreshMessagesFromServer(String channelId) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) return _storageService.getMessagesForChannel(channelId);
+
+      final remoteMessages =
+          await _remoteDataSource.fetchMessages(channelId, token: token);
+      final allMessages = _storageService.getMessages();
+      allMessages.removeWhere((m) => m.channelId == channelId);
+      allMessages.addAll(remoteMessages);
+      _storageService.saveMessages(allMessages);
+      remoteMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
       return remoteMessages;
     } on ApiException {
       rethrow;
@@ -85,7 +115,7 @@ class ChatRepository {
       );
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, text);
+      updateChannelLastMessage(channelId, text);
       return message;
     } on ApiException {
       rethrow;
@@ -114,7 +144,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, '\u{1F3A4} Voice message');
+      updateChannelLastMessage(channelId, '\u{1F3A4} Voice message');
       return message;
     } on ApiException {
       rethrow;
@@ -142,7 +172,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, isSticker ? 'Sticker' : 'GIF');
+      updateChannelLastMessage(channelId, isSticker ? 'Sticker' : 'GIF');
       return message;
     } on ApiException {
       rethrow;
@@ -170,7 +200,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
+      updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
       return message;
     } on ApiException {
       rethrow;
@@ -198,7 +228,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, '\u{1F3A5} Video');
+      updateChannelLastMessage(channelId, '\u{1F3A5} Video');
       return message;
     } on ApiException {
       rethrow;
@@ -238,7 +268,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(
+      updateChannelLastMessage(
         channelId,
         isLiveLocation ? '\u{1F4CD} Live location' : '\u{1F4CD} Location',
       );
@@ -274,7 +304,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, '\u{1F464} $name');
+      updateChannelLastMessage(channelId, '\u{1F464} $name');
       return message;
     } on ApiException {
       rethrow;
@@ -305,7 +335,7 @@ class ChatRepository {
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
-      _updateChannelLastMessage(channelId, '\u{1F4C4} $fileName');
+      updateChannelLastMessage(channelId, '\u{1F4C4} $fileName');
       return message;
     } on ApiException {
       rethrow;
@@ -326,7 +356,7 @@ class ChatRepository {
       status: MessageStatus.seen,
     );
     _persistMessage(message);
-    _updateChannelLastMessage(channelId, reply);
+    updateChannelLastMessage(channelId, reply);
     return message;
   }
 
@@ -388,7 +418,7 @@ class ChatRepository {
     }
   }
 
-  void _updateChannelLastMessage(String channelId, String text) {
+  void updateChannelLastMessage(String channelId, String text) {
     final chats = _storageService.getChats();
     final idx = chats.indexWhere((c) => c.id == channelId);
     if (idx >= 0) {
