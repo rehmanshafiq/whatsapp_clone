@@ -276,9 +276,10 @@ class ChatCubit extends Cubit<ChatState> {
     }
 
     // If the conversation is currently open, append the message to the
-    // messages list so the chat detail screen updates in real time.
+    // messages list so the chat detail screen updates in real time (like WhatsApp).
+    // Include incoming messages even when text is empty (e.g. media) using a fallback.
     List<Message>? updatedMessages;
-    if (isOpen && text.isNotEmpty) {
+    if (isOpen) {
       final rawSenderId = senderId ?? conversationId;
       final myBackendId = _repository.getCurrentUserId();
       final normalizedSenderId = (myBackendId != null &&
@@ -287,6 +288,16 @@ class ChatCubit extends Cubit<ChatState> {
           ? AppConstants.currentUserId
           : rawSenderId;
 
+      final displayText = text.isNotEmpty
+          ? text
+          : (_stringFrom(data['type']) == 'image'
+              ? '\u{1F4F7} Photo'
+              : _stringFrom(data['type']) == 'audio'
+                  ? '\u{1F3A4} Voice message'
+                  : _stringFrom(data['type']) == 'video'
+                      ? '\u{1F3A5} Video'
+                      : '\u{1F4DD} Message');
+
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
@@ -294,13 +305,14 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
-        text: text,
+        text: displayText,
         timestamp: timestamp,
         status: MessageStatus.sent,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);
       if (!alreadyExists) {
+        _repository.addOrUpdateMessage(message);
         updatedMessages = List<Message>.from(state.messages)..add(message);
       }
     }

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
@@ -29,6 +31,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
   bool _showScrollToBottom = false;
+  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -39,11 +42,24 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatCubit>().loadMessages(widget.channelId);
+      _startMessageRefreshPolling();
+    });
+  }
+
+  /// Polls for new messages while this chat is open so incoming messages from
+  /// other users appear in real time even if the backend doesn't push via WebSocket.
+  void _startMessageRefreshPolling() {
+    _refreshTimer?.cancel();
+    const interval = Duration(seconds: 2);
+    _refreshTimer = Timer.periodic(interval, (_) {
+      if (!mounted) return;
+      context.read<ChatCubit>().refreshMessages(widget.channelId);
     });
   }
 
   @override
   void dispose() {
+    _refreshTimer?.cancel();
     getIt<AudioPlaybackService>().stop();
     _scrollController
       ..removeListener(_handleScroll)
@@ -114,7 +130,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             .where((m) => m.channelId == widget.channelId)
             .toList();
         _syncReactions(forThisChat);
-        _scrollToBottom(animate: forThisChat.length > 1);
+        // Only auto-scroll when user is already at bottom (so new messages appear in view).
+        final atBottom = _scrollController.hasClients &&
+            _scrollController.position.pixels <= 80.0;
+        if (atBottom) _scrollToBottom(animate: forThisChat.length > 1);
       },
       builder: (context, state) {
         final channel = state.selectedChannel;

@@ -370,6 +370,13 @@ class ChatRepository {
     _storageService.saveMessages(allMessages);
   }
 
+  /// Persists an incoming message (e.g. from WebSocket) so it appears in
+  /// the chat and survives app restarts. Use when the cubit receives a
+  /// message for the open channel.
+  void addOrUpdateMessage(Message message) {
+    _persistMessage(message);
+  }
+
   void updateMessageStatus(String messageId, MessageStatus status) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == messageId);
