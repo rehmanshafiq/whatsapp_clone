@@ -492,74 +492,118 @@ class _TextMessageBubble extends StatelessWidget {
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-        ),
-        margin: EdgeInsets.only(
-          left: isOutgoing ? 64 : 8,
-          right: isOutgoing ? 8 : 64,
-          top: 2,
-          bottom: 2,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: isOutgoing
-              ? AppColors.outgoingBubble
-              : AppColors.incomingBubble,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
-            bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+      child: GestureDetector(
+        onLongPress: () => _showMessageActions(context),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
           ),
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Text(
-              _messageDisplayText(message.text),
-              style: TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 15,
-                height: 1.3,
-                fontStyle: _isDeletedMessage(message.text)
-                    ? FontStyle.italic
-                    : FontStyle.normal,
-              ),
+          margin: EdgeInsets.only(
+            left: isOutgoing ? 64 : 8,
+            right: isOutgoing ? 8 : 64,
+            top: 2,
+            bottom: 2,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: isOutgoing
+                ? AppColors.outgoingBubble
+                : AppColors.incomingBubble,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+              bottomRight: Radius.circular(isOutgoing ? 0 : 12),
             ),
-            const SizedBox(height: 2),
-            Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  time,
-                  style: TextStyle(
-                    color: AppColors.textSecondary.withValues(alpha: 0.7),
-                    fontSize: 11,
-                  ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                _messageDisplayText(message.text),
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 15,
+                  height: 1.3,
+                  fontStyle: _isDeletedMessage(message.text)
+                      ? FontStyle.italic
+                      : FontStyle.normal,
                 ),
-                if (message.isEdited) ...[
-                  const SizedBox(width: 4),
+              ),
+              const SizedBox(height: 2),
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
                   Text(
-                    'edited',
+                    time,
                     style: TextStyle(
                       color: AppColors.textSecondary.withValues(alpha: 0.7),
                       fontSize: 11,
-                      fontStyle: FontStyle.italic,
                     ),
                   ),
+                  if (message.isEdited) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      'edited',
+                      style: TextStyle(
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
+                  if (isOutgoing) ...[
+                    const SizedBox(width: 4),
+                    MessageStatusIcon(status: message.status, size: 14),
+                  ],
                 ],
-                if (isOutgoing) ...[
-                  const SizedBox(width: 4),
-                  MessageStatusIcon(status: message.status, size: 14),
-                ],
-              ],
-            ),
-          ],
+              ),
+            ],
+          ),
         ),
       ),
+    );
+  }
+
+  bool get _canDelete {
+    if (!message.isOutgoing) return false;
+    if (_isDeletedMessage(message.text)) return false;
+    return true;
+  }
+
+  Future<void> _showMessageActions(BuildContext context) async {
+    if (!_canDelete) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.appBar,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          top: false,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              if (_canDelete)
+                ListTile(
+                  leading:
+                      const Icon(Icons.delete_outline, color: AppColors.textPrimary),
+                  title: const Text(
+                    'Delete message',
+                    style: TextStyle(color: AppColors.textPrimary),
+                  ),
+                  onTap: () {
+                    Navigator.of(ctx).pop();
+                    context.read<ChatCubit>().deleteMessage(message);
+                  },
+                ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

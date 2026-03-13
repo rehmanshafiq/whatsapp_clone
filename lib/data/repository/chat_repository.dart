@@ -682,6 +682,54 @@ class ChatRepository {
     _webSocketService.send(envelope);
   }
 
+  /// Deletes one of the current user's sent messages (soft delete: body -> "message deleted").
+  void sendDeleteMessage({
+    required String messageId,
+    required String conversationId,
+    required String bucket,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'delete_message',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'bucket': bucket,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Edits one of the current user's sent messages (blocked once peer has read it).
+  void sendEditMessage({
+    required String messageId,
+    required String conversationId,
+    required String bucket,
+    required String body,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'edit_message',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'bucket': bucket,
+        'body': body,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
   /// Sends typing_start when the user begins typing. Re-send on each keystroke to reset server 4s TTL.
   void sendTypingStart({
     required String conversationId,

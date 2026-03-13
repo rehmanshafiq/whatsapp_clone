@@ -902,6 +902,39 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(searchQuery: query));
   }
 
+  /// Deletes one of the current user's sent messages (soft delete).
+  Future<void> deleteMessage(Message message) async {
+    if (!message.isOutgoing) return;
+    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      final bucket = _bucketFromTimestamp(message.timestamp);
+      _repository.sendDeleteMessage(
+        messageId: message.id,
+        conversationId: message.channelId,
+        bucket: bucket,
+        peerUserId: peerUserId,
+      );
+    }
+
+    final deleted = message.copyWith(
+      text: 'message deleted',
+      isEdited: false,
+    );
+    _repository.addOrUpdateMessage(deleted);
+    _replaceMessageInState(deleted);
+  }
+
+  String? _resolvePeerUserIdForChannel(String channelId) {
+    final channel = _repository.getChannel(channelId);
+    if (channel?.peerUserId != null && channel!.peerUserId!.isNotEmpty) {
+      return channel.peerUserId;
+    }
+    if (channelId.startsWith('channel_')) {
+      return channelId.replaceFirst('channel_', '');
+    }
+    return null;
+  }
+
   /// Sends typing_start (re-send on each keystroke to reset server 4s TTL).
   void sendTypingStart(String channelId) {
     final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
