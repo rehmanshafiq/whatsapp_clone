@@ -466,6 +466,54 @@ class ChatRepository {
     }
   }
 
+  void handleMessageDeletedLocally(String messageId, String conversationId) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == messageId);
+    if (idx >= 0) {
+      final msg = allMessages[idx];
+      // Message is unread if it is incoming and status is not seen (or read)
+      final isUnreadIncoming = !msg.isOutgoing && msg.status != MessageStatus.seen;
+      
+      allMessages[idx] = msg.copyWith(
+        text: 'This message was deleted',
+        type: MessageType.text,
+        audioPath: null,
+        mediaUrl: null,
+        documentFileName: null,
+        documentFileSize: null,
+        latitude: null,
+        longitude: null,
+        locationAddress: null,
+        locationName: null,
+        contactName: null,
+        contactPhone: null,
+      );
+      _storageService.saveMessages(allMessages);
+
+      if (isUnreadIncoming) {
+        final chats = _storageService.getChats();
+        final chatIdx = chats.indexWhere((c) => c.id == conversationId);
+        if (chatIdx >= 0 && chats[chatIdx].unreadCount > 0) {
+          chats[chatIdx] = chats[chatIdx].copyWith(unreadCount: chats[chatIdx].unreadCount - 1);
+          _storageService.saveChats(chats);
+        }
+      }
+    }
+  }
+
+  void handleMessageEditedLocally(String messageId, String conversationId, String newBody, bool isEdited, DateTime? editedAt) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == messageId);
+    if (idx >= 0) {
+      allMessages[idx] = allMessages[idx].copyWith(
+        text: newBody,
+        isEdited: isEdited,
+        editedAt: editedAt,
+      );
+      _storageService.saveMessages(allMessages);
+    }
+  }
+
   void updateMessageReactions(
     String messageId,
     Map<String, List<String>> reactions,

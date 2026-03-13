@@ -212,7 +212,7 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
-    if (eventType == 'typing_start' || eventType == 'typing_stop') {
+    if (eventType == 'typing_indicator' || eventType == 'typing_start' || eventType == 'typing_stop') {
       _handleTypingEvent(eventType!, raw);
       return;
     }
@@ -226,6 +226,14 @@ class ChatCubit extends Cubit<ChatState> {
     }
     if (eventType == 'message_status_update') {
       _handleMessageStatusUpdate(raw);
+      return;
+    }
+    if (eventType == 'message_deleted') {
+      _handleMessageDeleted(raw);
+      return;
+    }
+    if (eventType == 'message_edited') {
+      _handleMessageEdited(raw);
       return;
     }
     if (eventType == 'conversation_upserted') {
@@ -455,7 +463,7 @@ class ChatCubit extends Cubit<ChatState> {
         : raw;
     final conversationId = _stringFrom(data['conversation_id']);
     if (conversationId == null || state.selectedChannel?.id != conversationId) return;
-    final isTyping = eventType == 'typing_start';
+    final isTyping = eventType == 'typing_indicator' ? data['is_typing'] == true : eventType == 'typing_start';
     emit(state.copyWith(isTyping: isTyping));
   }
 
@@ -598,6 +606,74 @@ class ChatCubit extends Cubit<ChatState> {
     _repository.upsertChannel(updated);
     
     emit(state.copyWith(channels: channels));
+  }
+
+  void _handleMessageDeleted(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+    final messageId = _stringFrom(data['message_id']);
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (messageId == null || conversationId == null) return;
+
+    if (state.selectedChannel?.id == conversationId) {
+      final updatedMessages = state.messages.map((m) {
+        if (m.id == messageId) {
+          return m.copyWith(
+            text: 'This message was deleted',
+            type: MessageType.text,
+            audioPath: null,
+            mediaUrl: null,
+            documentFileName: null,
+            documentFileSize: null,
+            latitude: null,
+            longitude: null,
+            locationAddress: null,
+            locationName: null,
+            contactName: null,
+            contactPhone: null,
+          );
+        }
+        return m;
+      }).toList();
+      emit(state.copyWith(messages: updatedMessages));
+    }
+
+    _repository.handleMessageDeletedLocally(messageId, conversationId);
+    
+    // We update the channel list in case the deleted message was the last message displayed.
+    // It will fetch updated channels from DB.
+    refreshChatList();
+  }
+
+  void _handleMessageEdited(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+    final messageId = _stringFrom(data['message_id']);
+    final conversationId = _stringFrom(data['conversation_id']);
+    final newBody = _stringFrom(data['body']);
+    final isEdited = data['is_edited'] == true;
+    final editedAtStr = _stringFrom(data['edited_at']);
+    if (messageId == null || conversationId == null || newBody == null) return;
+
+    DateTime? editedAt = editedAtStr != null ? DateTime.tryParse(editedAtStr)?.toLocal() : DateTime.now();
+    
+    if (state.selectedChannel?.id == conversationId) {
+      final updatedMessages = state.messages.map((m) {
+        if (m.id == messageId) {
+          return m.copyWith(
+            text: newBody,
+            isEdited: isEdited,
+            editedAt: editedAt,
+          );
+        }
+        return m;
+      }).toList();
+      emit(state.copyWith(messages: updatedMessages));
+    }
+
+    _repository.handleMessageEditedLocally(messageId, conversationId, newBody, isEdited, editedAt);
+    
+    refreshChatList();
   }
 
   void _handlePresenceUpdate(Map<String, dynamic> raw) {

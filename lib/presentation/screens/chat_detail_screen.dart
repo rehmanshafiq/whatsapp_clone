@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
@@ -31,7 +29,6 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
   bool _showScrollToBottom = false;
-  Timer? _refreshTimer;
 
   @override
   void initState() {
@@ -42,24 +39,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     _scrollController.addListener(_handleScroll);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<ChatCubit>().loadMessages(widget.channelId);
-      _startMessageRefreshPolling();
-    });
-  }
-
-  /// Polls for new messages while this chat is open so incoming messages from
-  /// other users appear in real time even if the backend doesn't push via WebSocket.
-  void _startMessageRefreshPolling() {
-    _refreshTimer?.cancel();
-    const interval = Duration(seconds: 2);
-    _refreshTimer = Timer.periodic(interval, (_) {
-      if (!mounted) return;
-      context.read<ChatCubit>().refreshMessages(widget.channelId);
     });
   }
 
   @override
   void dispose() {
-    _refreshTimer?.cancel();
     getIt<AudioPlaybackService>().stop();
     _scrollController
       ..removeListener(_handleScroll)
