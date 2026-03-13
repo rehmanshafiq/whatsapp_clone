@@ -549,7 +549,7 @@ class ChatRepository {
 
       final channel = await _remoteDataSource.createConversation(
         token: token,
-        participantId: user.userId,
+        peerUserId: user.userId,
       );
 
       final chats = _storageService.getChats();

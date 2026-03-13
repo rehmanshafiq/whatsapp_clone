@@ -32,6 +32,14 @@ class Message extends Equatable {
   /// For document messages: file size in bytes.
   final int? documentFileSize;
   final Map<String, List<String>> reactions;
+  /// When the message was delivered (from API delivered_at).
+  final DateTime? deliveredAt;
+  /// When the message was read (from API read_at).
+  final DateTime? readAt;
+  /// Whether the message was edited (from API is_edited).
+  final bool isEdited;
+  /// When the message was last edited (from API edited_at).
+  final DateTime? editedAt;
 
   const Message({
     required this.id,
@@ -59,6 +67,10 @@ class Message extends Equatable {
     this.documentFileName,
     this.documentFileSize,
     this.reactions = const {},
+    this.deliveredAt,
+    this.readAt,
+    this.isEdited = false,
+    this.editedAt,
   });
 
   Message copyWith({
@@ -87,6 +99,10 @@ class Message extends Equatable {
     String? documentFileName,
     int? documentFileSize,
     Map<String, List<String>>? reactions,
+    DateTime? deliveredAt,
+    DateTime? readAt,
+    bool? isEdited,
+    DateTime? editedAt,
   }) {
     return Message(
       id: id ?? this.id,
@@ -115,6 +131,10 @@ class Message extends Equatable {
       documentFileName: documentFileName ?? this.documentFileName,
       documentFileSize: documentFileSize ?? this.documentFileSize,
       reactions: reactions ?? this.reactions,
+      deliveredAt: deliveredAt ?? this.deliveredAt,
+      readAt: readAt ?? this.readAt,
+      isEdited: isEdited ?? this.isEdited,
+      editedAt: editedAt ?? this.editedAt,
     );
   }
 
@@ -144,6 +164,10 @@ class Message extends Equatable {
     'documentFileName': documentFileName,
     'documentFileSize': documentFileSize,
     'reactions': reactions.map((k, v) => MapEntry(k, v)),
+    'deliveredAt': deliveredAt?.toIso8601String(),
+    'readAt': readAt?.toIso8601String(),
+    'isEdited': isEdited,
+    'editedAt': editedAt?.toIso8601String(),
   };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -184,6 +208,16 @@ class Message extends Equatable {
           (k, v) => MapEntry(k, List<String>.from(v as List)),
         ) ??
         const {},
+    deliveredAt: json['deliveredAt'] != null
+        ? DateTime.parse(json['deliveredAt'] as String)
+        : null,
+    readAt: json['readAt'] != null
+        ? DateTime.parse(json['readAt'] as String)
+        : null,
+    isEdited: json['isEdited'] as bool? ?? false,
+    editedAt: json['editedAt'] != null
+        ? DateTime.parse(json['editedAt'] as String)
+        : null,
   );
 
   bool get isOutgoing => senderId == 'me';
@@ -223,5 +257,9 @@ class Message extends Equatable {
     documentFileName,
     documentFileSize,
     reactions,
+    deliveredAt,
+    readAt,
+    isEdited,
+    editedAt,
   ];
 }

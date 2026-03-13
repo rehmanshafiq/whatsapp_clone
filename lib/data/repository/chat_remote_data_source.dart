@@ -157,12 +157,12 @@ class ChatRemoteDataSource {
 
   Future<ChatChannel> createConversation({
     required String token,
-    required String participantId,
+    required String peerUserId,
   }) async {
     try {
       final response = await _dio.post<dynamic>(
         '/api/v1/chat/conversations',
-        data: <String, dynamic>{'participant_id': participantId},
+        data: <String, dynamic>{'peer_user_id': peerUserId},
         options: Options(
           headers: <String, String>{
             'authorization': 'Bearer $token',
@@ -285,6 +285,46 @@ class ChatRemoteDataSource {
         status = MessageStatus.values[i];
       }
     }
+    final attachmentUrl = _asString(json['attachment_url']) ??
+        _asString(json['mediaUrl']) ??
+        '';
+    final attachmentType = _asString(json['attachment_type'])?.toLowerCase() ?? '';
+    MessageType type = MessageType.text;
+    if (attachmentUrl.isNotEmpty || attachmentType.isNotEmpty) {
+      switch (attachmentType) {
+        case 'image':
+          type = MessageType.image;
+          break;
+        case 'video':
+          type = MessageType.video;
+          break;
+        case 'audio':
+          type = MessageType.audio;
+          break;
+        case 'gif':
+          type = MessageType.gif;
+          break;
+        case 'sticker':
+          type = MessageType.sticker;
+          break;
+        case 'document':
+          type = MessageType.document;
+          break;
+        case 'location':
+          type = MessageType.location;
+          break;
+        default:
+          if (attachmentUrl.isNotEmpty) type = MessageType.image;
+      }
+    }
+    final isEdited = json['is_edited'] == true || json['isEdited'] == true;
+    final editedAt = _asDateTime(json['edited_at']) ?? _asDateTime(json['editedAt']);
+    final editedAtValid = editedAt != null &&
+        editedAt.isAfter(DateTime.utc(2000, 1, 1))
+        ? editedAt
+        : null;
+    final deliveredAt = _asDateTime(json['delivered_at']) ?? _asDateTime(json['deliveredAt']);
+    final readAt = _asDateTime(json['read_at']) ?? _asDateTime(json['readAt']);
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
@@ -292,6 +332,12 @@ class ChatRemoteDataSource {
       text: text,
       timestamp: ts,
       status: status,
+      type: type,
+      mediaUrl: attachmentUrl.isEmpty ? null : attachmentUrl,
+      deliveredAt: deliveredAt,
+      readAt: readAt,
+      isEdited: isEdited,
+      editedAt: editedAtValid,
     );
   }
 
