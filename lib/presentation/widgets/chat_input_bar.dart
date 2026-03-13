@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -18,6 +19,10 @@ class ChatInputBar extends StatefulWidget {
   final ValueChanged<String> onSend;
   final void Function(File audioFile, Duration duration) onSendAudio;
   final void Function(String mediaUrl, bool isSticker) onSendMedia;
+  /// Called when user begins typing. Re-sent on keystrokes to reset server 4s TTL.
+  final VoidCallback? onTypingStart;
+  /// Called when user stops typing (input cleared, message sent, or screen left).
+  final VoidCallback? onTypingStop;
 
   const ChatInputBar({
     super.key,
@@ -25,6 +30,8 @@ class ChatInputBar extends StatefulWidget {
     required this.onSend,
     required this.onSendAudio,
     required this.onSendMedia,
+    this.onTypingStart,
+    this.onTypingStop,
   });
 
   @override
@@ -39,18 +46,48 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   bool _isEmojiVisible = false;
   String? _voiceNoteDir;
   late final TabController _tabController;
+  /// Throttle: re-send typing_start every 2s while typing to reset server 4s TTL.
+  Timer? _typingThrottleTimer;
+  bool _typingSent = false;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 3, vsync: this);
-    _controller.addListener(() {
-      final has = _controller.text.trim().isNotEmpty;
-      if (has != _hasText) {
-        setState(() => _hasText = has);
-      }
-    });
+    _controller.addListener(_onTextChanged);
     _initVoiceDir();
+  }
+
+  void _onTextChanged() {
+    final has = _controller.text.trim().isNotEmpty;
+    if (has != _hasText) {
+      setState(() => _hasText = has);
+    }
+    if (has) {
+      if (!_typingSent) {
+        _typingSent = true;
+        widget.onTypingStart?.call();
+      }
+      _scheduleTypingRefresh();
+    } else {
+      _typingSent = false;
+      _typingThrottleTimer?.cancel();
+      _typingThrottleTimer = null;
+      widget.onTypingStop?.call();
+    }
+  }
+
+  /// Re-send typing_start every 2s while user types to reset server 4s TTL.
+  void _scheduleTypingRefresh() {
+    _typingThrottleTimer?.cancel();
+    if (!mounted || _controller.text.trim().isEmpty) return;
+    _typingThrottleTimer = Timer(const Duration(seconds: 2), () {
+      _typingThrottleTimer = null;
+      if (!mounted) return;
+      if (_controller.text.trim().isEmpty) return;
+      widget.onTypingStart?.call();
+      _scheduleTypingRefresh();
+    });
   }
 
   Future<void> _initVoiceDir() async {
@@ -75,6 +112,9 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
 
   @override
   void dispose() {
+    widget.onTypingStop?.call();
+    _typingThrottleTimer?.cancel();
+    _controller.removeListener(_onTextChanged);
     _tabController.dispose();
     _controller.dispose();
     _textFocusNode.dispose();
@@ -86,6 +126,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     if (text.isEmpty) return;
     widget.onSend(text);
     _controller.clear();
+    widget.onTypingStop?.call();
   }
 
   Duration _parseRecordingTime(String time) {

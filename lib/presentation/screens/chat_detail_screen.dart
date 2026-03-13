@@ -254,6 +254,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             url,
                             isSticker,
                           ),
+                      onTypingStart: () =>
+                          cubit.sendTypingStart(widget.channelId),
+                      onTypingStop: () =>
+                          cubit.sendTypingStop(widget.channelId),
                     ),
                   ],
                 ),

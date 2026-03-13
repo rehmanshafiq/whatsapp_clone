@@ -681,4 +681,42 @@ class ChatRepository {
 
     _webSocketService.send(envelope);
   }
+
+  /// Sends typing_start when the user begins typing. Re-send on each keystroke to reset server 4s TTL.
+  void sendTypingStart({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'typing_start',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends typing_stop when the user stops typing (input cleared, message sent, or screen left).
+  void sendTypingStop({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'typing_stop',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
 }

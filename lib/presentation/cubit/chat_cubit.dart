@@ -902,6 +902,34 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(searchQuery: query));
   }
 
+  /// Sends typing_start (re-send on each keystroke to reset server 4s TTL).
+  void sendTypingStart(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendTypingStart(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  /// Sends typing_stop when input cleared, message sent, or screen left.
+  void sendTypingStop(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendTypingStop(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
   void deleteChat(String channelId) {
     _repository.deleteChat(channelId);
     final updated = List.of(state.channels)
