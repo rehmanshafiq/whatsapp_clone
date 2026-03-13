@@ -104,13 +104,36 @@ class ChatCubit extends Cubit<ChatState> {
 
       if (channel != null) {
         _repository.clearUnread(channelId);
+        // Send message_read for every unread received message (double blue tick).
+        // peer_user_id = sender of the message (avoids DB lookup on backend).
+        for (final m in messages) {
+          if (!m.isOutgoing && m.status != MessageStatus.seen) {
+            final peerUserId = m.senderId; // sender of the message
+            if (peerUserId.isNotEmpty && peerUserId != AppConstants.currentUserId) {
+              final bucket = _bucketFromTimestamp(m.timestamp);
+              _repository.sendMessageRead(
+                messageId: m.id,
+                conversationId: channelId,
+                bucket: bucket,
+                peerUserId: peerUserId,
+              );
+              _repository.updateMessageStatus(m.id, MessageStatus.seen);
+            }
+          }
+        }
         final updatedChats = await _repository.getChats();
         updatedChats.sort(
           (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
         );
+        final messagesWithSeen = messages.map((m) {
+          if (!m.isOutgoing && m.status != MessageStatus.seen) {
+            return m.copyWith(status: MessageStatus.seen);
+          }
+          return m;
+        }).toList();
         emit(
           state.copyWith(
-            messages: messages,
+            messages: messagesWithSeen,
             selectedChannel: channel.copyWith(unreadCount: 0),
             isOnline: channel.isOnline,
             isLoading: false,
@@ -189,6 +212,14 @@ class ChatCubit extends Cubit<ChatState> {
     if (eventType == 'ping' || eventType == 'pong') return;
     if (eventType == 'typing_start' || eventType == 'typing_stop') {
       _handleTypingEvent(eventType!, raw);
+      return;
+    }
+    if (eventType == 'presence_update') {
+      _handlePresenceUpdate(raw);
+      return;
+    }
+    if (eventType == 'message_sent_ack') {
+      _handleMessageSentAck(raw);
       return;
     }
 
@@ -326,6 +357,22 @@ class ChatCubit extends Cubit<ChatState> {
       if (!alreadyExists) {
         _repository.addOrUpdateMessage(message);
         updatedMessages = List<Message>.from(state.messages)..add(message);
+        // Send message_delivered when we receive new_message (double grey tick).
+        if (!isOutgoing) {
+          final serverMsgId = _stringFrom(data['message_id']) ??
+              _stringFrom(data['id']) ??
+              message.id;
+          final bucket = _bucketFromTimestamp(timestamp);
+          final senderIdForDelivered = senderId ?? message.senderId;
+          if (senderIdForDelivered.isNotEmpty) {
+            _repository.sendMessageDelivered(
+              messageId: serverMsgId,
+              conversationId: conversationId,
+              bucket: bucket,
+              peerUserId: senderIdForDelivered,
+            );
+          }
+        }
       }
     }
 
@@ -345,6 +392,82 @@ class ChatCubit extends Cubit<ChatState> {
     if (conversationId == null || state.selectedChannel?.id != conversationId) return;
     final isTyping = eventType == 'typing_start';
     emit(state.copyWith(isTyping: isTyping));
+  }
+
+  void _handleMessageSentAck(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final clientMsgId = _stringFrom(data['client_msg_id']);
+    final serverMessageId = _stringFrom(data['message_id']) ?? _stringFrom(data['id']);
+    if (clientMsgId == null || serverMessageId == null) return;
+    final messages = state.messages;
+    final idx = messages.indexWhere((m) => m.id == clientMsgId);
+    if (idx == -1) return;
+    _statusTimers[clientMsgId]?.forEach((t) => t.cancel());
+    _statusTimers.remove(clientMsgId);
+    _repository.replaceOptimisticMessageId(clientMsgId, serverMessageId);
+    final updatedMessages = messages.map((m) {
+      if (m.id == clientMsgId) return m.copyWith(id: serverMessageId, status: MessageStatus.sent);
+      return m;
+    }).toList();
+    emit(state.copyWith(messages: updatedMessages));
+  }
+
+  void _handlePresenceUpdate(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final userId = _stringFrom(data['user_id']) ?? _stringFrom(data['peer_user_id']);
+    if (userId == null) return;
+    final status = _stringFrom(data['status']);
+    final lastSeenMs = data['last_seen'];
+    DateTime? lastSeen;
+    if (lastSeenMs is int) {
+      lastSeen = DateTime.fromMillisecondsSinceEpoch(lastSeenMs, isUtc: true);
+    } else if (lastSeenMs is String) {
+      lastSeen = DateTime.tryParse(lastSeenMs);
+    }
+    final isOnline = status == 'online';
+    final channels = List<ChatChannel>.from(state.channels);
+    var updated = false;
+    for (var i = 0; i < channels.length; i++) {
+      final c = channels[i];
+      if (c.peerUserId == userId) {
+        channels[i] = c.copyWith(
+          isOnline: isOnline,
+          lastSeen: lastSeen ?? c.lastSeen,
+        );
+        updated = true;
+        break;
+      }
+      if (c.id == 'channel_$userId') {
+        channels[i] = c.copyWith(
+          isOnline: isOnline,
+          lastSeen: lastSeen ?? c.lastSeen,
+          peerUserId: c.peerUserId ?? userId,
+        );
+        updated = true;
+        break;
+      }
+    }
+    if (updated) {
+      final isSelectedPeer = state.selectedChannel?.peerUserId == userId ||
+          state.selectedChannel?.id == 'channel_$userId';
+      emit(state.copyWith(
+        channels: channels,
+        isOnline: isSelectedPeer ? isOnline : state.isOnline,
+      ));
+    }
+  }
+
+  static String _bucketFromTimestamp(DateTime timestamp) {
+    final y = timestamp.year;
+    final m = timestamp.month;
+    final d = timestamp.day;
+    return '$y-${m.toString().padLeft(2, '0')}-${d.toString().padLeft(2, '0')}';
   }
 
   Future<void> sendAudioMessage(

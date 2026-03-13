@@ -431,6 +431,9 @@ class ChatRemoteDataSource {
         _asDateTime(json['created_at']) ??
         DateTime.now();
 
+    final peerUserId =
+        _asString(json['peer_user_id']) ?? _asString(otherUserMap?['id']);
+
     return ChatChannel(
       id: id,
       name: name,
@@ -439,6 +442,7 @@ class ChatRemoteDataSource {
       lastMessageTime: lastMessageTime,
       unreadCount: _asInt(json['unread_count']) ?? 0,
       isOnline: json['is_online'] == true,
+      peerUserId: peerUserId,
     );
   }
 

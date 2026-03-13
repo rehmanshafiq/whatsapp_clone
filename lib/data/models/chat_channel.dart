@@ -8,6 +8,10 @@ class ChatChannel extends Equatable {
   final DateTime lastMessageTime;
   final int unreadCount;
   final bool isOnline;
+  /// Peer participant's user id (for WebSocket send_message / message_delivered / message_read).
+  final String? peerUserId;
+  /// Last seen timestamp when peer is offline (from presence_update).
+  final DateTime? lastSeen;
 
   const ChatChannel({
     required this.id,
@@ -17,6 +21,8 @@ class ChatChannel extends Equatable {
     required this.lastMessageTime,
     this.unreadCount = 0,
     this.isOnline = false,
+    this.peerUserId,
+    this.lastSeen,
   });
 
   ChatChannel copyWith({
@@ -27,6 +33,8 @@ class ChatChannel extends Equatable {
     DateTime? lastMessageTime,
     int? unreadCount,
     bool? isOnline,
+    String? peerUserId,
+    DateTime? lastSeen,
   }) {
     return ChatChannel(
       id: id ?? this.id,
@@ -36,6 +44,8 @@ class ChatChannel extends Equatable {
       lastMessageTime: lastMessageTime ?? this.lastMessageTime,
       unreadCount: unreadCount ?? this.unreadCount,
       isOnline: isOnline ?? this.isOnline,
+      peerUserId: peerUserId ?? this.peerUserId,
+      lastSeen: lastSeen ?? this.lastSeen,
     );
   }
 
@@ -47,6 +57,8 @@ class ChatChannel extends Equatable {
         'lastMessageTime': lastMessageTime.toIso8601String(),
         'unreadCount': unreadCount,
         'isOnline': isOnline,
+        'peerUserId': peerUserId,
+        'lastSeen': lastSeen?.toIso8601String(),
       };
 
   factory ChatChannel.fromJson(Map<String, dynamic> json) => ChatChannel(
@@ -57,6 +69,10 @@ class ChatChannel extends Equatable {
         lastMessageTime: DateTime.parse(json['lastMessageTime'] as String),
         unreadCount: json['unreadCount'] as int? ?? 0,
         isOnline: json['isOnline'] as bool? ?? false,
+        peerUserId: json['peerUserId'] as String?,
+        lastSeen: json['lastSeen'] != null
+            ? DateTime.tryParse(json['lastSeen'] as String)
+            : null,
       );
 
   @override
@@ -68,5 +84,7 @@ class ChatChannel extends Equatable {
         lastMessageTime,
         unreadCount,
         isOnline,
+        peerUserId,
+        lastSeen,
       ];
 }

@@ -123,8 +123,9 @@ class ChatRepository {
 
   Future<Message> sendMessage(String channelId, String text) async {
     try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: text,
@@ -132,11 +133,17 @@ class ChatRepository {
         status: MessageStatus.sending,
       );
 
-      _sendMessageOverSocket(
-        conversationId: channelId,
-        text: text,
-        timestamp: message.timestamp,
-      );
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: '',
+          attachmentUrl: '',
+        );
+      }
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
       updateChannelLastMessage(channelId, text);
@@ -146,6 +153,18 @@ class ChatRepository {
     } catch (e) {
       throw ApiException(message: e.toString());
     }
+  }
+
+  /// Resolves peer user id for a channel (from stored channel or channel_ prefix).
+  String? _getPeerUserIdForChannel(String channelId) {
+    final channel = getChannel(channelId);
+    if (channel?.peerUserId != null && channel!.peerUserId!.isNotEmpty) {
+      return channel.peerUserId;
+    }
+    if (channelId.startsWith('channel_')) {
+      return channelId.replaceFirst('channel_', '');
+    }
+    return null;
   }
 
   Future<Message> sendAudioMessage(
@@ -386,6 +405,18 @@ class ChatRepository {
     _persistMessage(message);
   }
 
+  /// Replaces optimistic message id with server-assigned id (from message_sent_ack).
+  void replaceOptimisticMessageId(String clientMsgId, String serverMessageId) {
+    final allMessages = _storageService.getMessages();
+    final idx = allMessages.indexWhere((m) => m.id == clientMsgId);
+    if (idx == -1) return;
+    allMessages[idx] = allMessages[idx].copyWith(
+      id: serverMessageId,
+      status: MessageStatus.sent,
+    );
+    _storageService.saveMessages(allMessages);
+  }
+
   void updateMessageStatus(String messageId, MessageStatus status) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == messageId);
@@ -483,6 +514,7 @@ class ChatRepository {
       name: contact.name,
       avatarUrl: contact.avatarUrl,
       lastMessageTime: DateTime.now(),
+      peerUserId: contact.id,
     );
     chats.insert(0, channel);
     _storageService.saveChats(chats);
@@ -578,24 +610,75 @@ class ChatRepository {
   }
 
   void _sendMessageOverSocket({
+    required String clientMsgId,
     required String conversationId,
-    required String text,
-    required DateTime timestamp,
+    required String peerUserId,
+    required String body,
+    String attachmentType = '',
+    String attachmentUrl = '',
   }) {
     if (!_webSocketService.isConnected) return;
 
-    // Backend expects event-based format so it can broadcast to the other participant.
-    final payload = <String, dynamic>{
+    // Message envelope: event, data (object, never null), optional id, timestamp (Unix ms).
+    final envelope = <String, dynamic>{
       'event': 'send_message',
       'data': <String, dynamic>{
+        'client_msg_id': clientMsgId,
         'conversation_id': conversationId,
-        'sender_id': AppConstants.currentUserId,
-        'body': text,
-        'message': text,
-        'timestamp': timestamp.toIso8601String(),
+        'peer_user_id': peerUserId,
+        'body': body,
+        'attachment_type': attachmentType,
+        'attachment_url': attachmentUrl,
       },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
-    _webSocketService.send(payload);
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends message_delivered when we receive a new_message (double grey tick).
+  void sendMessageDelivered({
+    required String messageId,
+    required String conversationId,
+    required String bucket,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'message_delivered',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'bucket': bucket,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends message_read when user opens/views the conversation (double blue tick).
+  void sendMessageRead({
+    required String messageId,
+    required String conversationId,
+    required String bucket,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'message_read',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'bucket': bucket,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
   }
 }
