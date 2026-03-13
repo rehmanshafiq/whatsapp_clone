@@ -98,7 +98,8 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(isLoading: true, clearError: true));
     try {
       final channel = _repository.getChannel(channelId);
-      final messages = await _repository.getMessages(channelId);
+      final raw = await _repository.getMessages(channelId);
+      final messages = _repository.normalizeMessageSenderIds(raw);
       messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
       if (channel != null) {
@@ -129,8 +130,8 @@ class ChatCubit extends Cubit<ChatState> {
   Future<void> refreshMessages(String channelId) async {
     if (isClosed) return;
     try {
-      final messages =
-          await _repository.refreshMessagesFromServer(channelId);
+      final raw = await _repository.refreshMessagesFromServer(channelId);
+      final messages = _repository.normalizeMessageSenderIds(raw);
       if (!isClosed && state.selectedChannel?.id == channelId) {
         final updatedChats = await _repository.getChats();
         updatedChats.sort(
@@ -282,11 +283,22 @@ class ChatCubit extends Cubit<ChatState> {
     if (isOpen) {
       final rawSenderId = senderId ?? conversationId;
       final myBackendId = _repository.getCurrentUserId();
-      final normalizedSenderId = (myBackendId != null &&
-              myBackendId.isNotEmpty &&
-              rawSenderId == myBackendId)
-          ? AppConstants.currentUserId
-          : rawSenderId;
+      // Show "message deleted" on the right (outgoing) when backend omits sender_id
+      // or when sender is current user, so mobile and web match.
+      final bool isDeletedMessage = text == 'message deleted';
+      final bool senderMissing = senderId == null || senderId.isEmpty;
+      String normalizedSenderId;
+      if (myBackendId != null && myBackendId.isNotEmpty) {
+        if (rawSenderId == myBackendId) {
+          normalizedSenderId = AppConstants.currentUserId;
+        } else if (isDeletedMessage && senderMissing) {
+          normalizedSenderId = AppConstants.currentUserId;
+        } else {
+          normalizedSenderId = rawSenderId;
+        }
+      } else {
+        normalizedSenderId = rawSenderId;
+      }
 
       final displayText = text.isNotEmpty
           ? text

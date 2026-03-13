@@ -16,6 +16,13 @@ import 'document_message_bubble.dart';
 import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
 
+/// Display text for message body. "message deleted" -> "This message was deleted".
+String _messageDisplayText(String body) =>
+    body == 'message deleted' ? 'This message was deleted' : body;
+
+/// True when body indicates a deleted message (show in italic).
+bool _isDeletedMessage(String body) => body == 'message deleted';
+
 class MessageBubble extends StatelessWidget {
   final Message message;
   final ReactionsController reactionsController;
@@ -512,11 +519,14 @@ class _TextMessageBubble extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              message.text,
-              style: const TextStyle(
+              _messageDisplayText(message.text),
+              style: TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 15,
                 height: 1.3,
+                fontStyle: _isDeletedMessage(message.text)
+                    ? FontStyle.italic
+                    : FontStyle.normal,
               ),
             ),
             const SizedBox(height: 2),
@@ -530,6 +540,17 @@ class _TextMessageBubble extends StatelessWidget {
                     fontSize: 11,
                   ),
                 ),
+                if (message.isEdited) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    'edited',
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
                 if (isOutgoing) ...[
                   const SizedBox(width: 4),
                   MessageStatusIcon(status: message.status, size: 14),
@@ -625,11 +646,14 @@ class _MediaMessageBubble extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
                 child: Text(
-                  message.text,
-                  style: const TextStyle(
+                  _messageDisplayText(message.text),
+                  style: TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
                     height: 1.3,
+                    fontStyle: _isDeletedMessage(message.text)
+                        ? FontStyle.italic
+                        : FontStyle.normal,
                   ),
                 ),
               ),
@@ -645,6 +669,17 @@ class _MediaMessageBubble extends StatelessWidget {
                       fontSize: 11,
                     ),
                   ),
+                  if (message.isEdited) ...[
+                    const SizedBox(width: 4),
+                    Text(
+                      'edited',
+                      style: TextStyle(
+                        color: AppColors.textSecondary.withValues(alpha: 0.7),
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
                   if (isOutgoing) ...[
                     const SizedBox(width: 4),
                     MessageStatusIcon(status: message.status, size: 14),
@@ -788,10 +823,13 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
                 child: Text(
-                  widget.message.text,
-                  style: const TextStyle(
+                  _messageDisplayText(widget.message.text),
+                  style: TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
+                    fontStyle: _isDeletedMessage(widget.message.text)
+                        ? FontStyle.italic
+                        : FontStyle.normal,
                   ),
                 ),
               ),
@@ -806,6 +844,17 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                     fontSize: 11,
                   ),
                 ),
+                if (widget.message.isEdited) ...[
+                  const SizedBox(width: 4),
+                  Text(
+                    'edited',
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
+                      fontStyle: FontStyle.italic,
+                    ),
+                  ),
+                ],
                 if (isOutgoing) ...[
                   const SizedBox(width: 4),
                   MessageStatusIcon(status: widget.message.status, size: 14),

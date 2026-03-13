@@ -89,12 +89,21 @@ class ChatRepository {
         .toList();
   }
 
+  /// Normalizes sender IDs for display (e.g. when loading from storage or emitting state).
+  /// Call before showing messages in the UI so own messages show on the right.
+  List<Message> normalizeMessageSenderIds(List<Message> messages) {
+    return _normalizeMessageSenderIds(messages);
+  }
+
   /// Fetches messages for [channelId] from the server and updates local
   /// storage. Use for polling so new messages appear without WebSocket.
   Future<List<Message>> refreshMessagesFromServer(String channelId) async {
     try {
       final token = _storageService.getToken();
-      if (token == null || token.isEmpty) return _storageService.getMessagesForChannel(channelId);
+      if (token == null || token.isEmpty) {
+        final fromStorage = _storageService.getMessagesForChannel(channelId);
+        return _normalizeMessageSenderIds(fromStorage);
+      }
 
       final remoteMessages =
           await _remoteDataSource.fetchMessages(channelId, token: token);
