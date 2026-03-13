@@ -207,6 +207,8 @@ class ChatCubit extends Cubit<ChatState> {
 
     if (raw == null) return;
 
+    debugPrint('[ChatCubit] Raw socket payload: $raw');
+
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
@@ -292,7 +294,23 @@ class ChatCubit extends Cubit<ChatState> {
       _repository.incrementUnread(conversationId);
     }
 
-    final displayText = text.isNotEmpty ? text : current.lastMessage;
+    final messageTypeStr = _stringFrom(data['type']);
+    final String resolvedPayloadText;
+    if (text.isNotEmpty) {
+      resolvedPayloadText = text;
+    } else if (messageTypeStr == 'image') {
+      resolvedPayloadText = '\u{1F4F7} Photo';
+    } else if (messageTypeStr == 'audio') {
+      resolvedPayloadText = '\u{1F3A4} Voice message';
+    } else if (messageTypeStr == 'video') {
+      resolvedPayloadText = '\u{1F3A5} Video';
+    } else if (messageTypeStr != null && messageTypeStr.isNotEmpty) {
+      resolvedPayloadText = '\u{1F4DD} Message';
+    } else {
+      resolvedPayloadText = '';
+    }
+
+    final displayText = resolvedPayloadText.isNotEmpty ? resolvedPayloadText : current.lastMessage;
     final updated = current.copyWith(
       lastMessage: displayText,
       lastMessageTime: timestamp,
@@ -331,15 +349,9 @@ class ChatCubit extends Cubit<ChatState> {
         normalizedSenderId = rawSenderId;
       }
 
-      final displayText = text.isNotEmpty
-          ? text
-          : (_stringFrom(data['type']) == 'image'
-              ? '\u{1F4F7} Photo'
-              : _stringFrom(data['type']) == 'audio'
-                  ? '\u{1F3A4} Voice message'
-                  : _stringFrom(data['type']) == 'video'
-                      ? '\u{1F3A5} Video'
-                      : '\u{1F4DD} Message');
+      final messageTextForList = resolvedPayloadText.isNotEmpty
+          ? resolvedPayloadText
+          : '\u{1F4DD} Message';
 
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
@@ -348,7 +360,7 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
-        text: displayText,
+        text: messageTextForList,
         timestamp: timestamp,
         status: MessageStatus.sent,
       );

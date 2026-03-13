@@ -25,8 +25,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
   bool _isSearching = false;
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
-  Timer? _pollTimer;
-  static const _pollInterval = Duration(seconds: 1);
 
   @override
   void initState() {
@@ -35,16 +33,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (!mounted) return;
       final cubit = context.read<ChatCubit>();
       cubit.loadChats();
-      _pollTimer = Timer.periodic(_pollInterval, (_) {
-        if (!mounted) return;
-        context.read<ChatCubit>().refreshChatList();
-      });
     });
   }
 
   @override
   void dispose() {
-    _pollTimer?.cancel();
     _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
@@ -150,14 +143,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ],
       ),
       body: BlocBuilder<ChatCubit, ChatState>(
-        buildWhen: (previous, current) =>
-            previous.channels != current.channels ||
-            previous.isLoading != current.isLoading ||
-            previous.error != current.error ||
-            previous.searchQuery != current.searchQuery ||
-            previous.userSearchResults != current.userSearchResults ||
-            previous.isUserSearchLoading != current.isUserSearchLoading ||
-            previous.userSearchError != current.userSearchError,
+        buildWhen: (previous, current) {
+          if (previous.isLoading != current.isLoading) return true;
+          if (previous.error != current.error) return true;
+          if (previous.searchQuery != current.searchQuery) return true;
+          if (previous.userSearchResults != current.userSearchResults) return true;
+          if (previous.isUserSearchLoading != current.isUserSearchLoading) return true;
+          if (previous.userSearchError != current.userSearchError) return true;
+          // Equatable equality on lists inside ChatState will trigger build
+          if (previous.channels != current.channels) return true;
+          return false;
+        },
         builder: (context, state) {
           if (state.isLoading && state.channels.isEmpty) {
             return const ShimmerChatList();
@@ -236,7 +232,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
 
             return ListView.separated(
               itemCount: searchResults.length,
-              separatorBuilder: (_, __) => const Divider(
+              separatorBuilder: (context, index) => const Divider(
                 color: AppColors.divider,
                 height: 1,
                 indent: 76,
