@@ -173,8 +173,9 @@ class ChatRepository {
     Duration audioDuration,
   ) async {
     try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_audio';
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_audio',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: '',
@@ -184,6 +185,19 @@ class ChatRepository {
         audioPath: audioPath,
         audioDuration: audioDuration,
       );
+
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: '',
+          // Backend contract: "voice" for voice notes.
+          attachmentType: 'voice',
+          attachmentUrl: audioPath,
+        );
+      }
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -202,8 +216,9 @@ class ChatRepository {
     bool isSticker,
   ) async {
     try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_media';
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_media',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: '',
@@ -212,6 +227,18 @@ class ChatRepository {
         type: isSticker ? MessageType.sticker : MessageType.gif,
         mediaUrl: mediaUrl,
       );
+
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: '',
+          attachmentType: isSticker ? 'sticker' : 'gif',
+          attachmentUrl: mediaUrl,
+        );
+      }
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -230,8 +257,9 @@ class ChatRepository {
     String text = '',
   }) async {
     try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_image';
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_image',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: text,
@@ -240,6 +268,18 @@ class ChatRepository {
         type: MessageType.image,
         mediaUrl: imagePath,
       );
+
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'image',
+          attachmentUrl: imagePath,
+        );
+      }
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);

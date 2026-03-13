@@ -92,8 +92,14 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   }
 
   void _togglePlayback() {
-    final path = widget.message.audioPath;
-    if (path == null || !File(path).existsSync()) return;
+    // Prefer explicit audioPath (local recording). Fall back to mediaUrl
+    // for audio/voice messages coming from the server that only provide
+    // attachment_url.
+    final path = widget.message.audioPath ?? widget.message.mediaUrl;
+    if (path == null) return;
+    if (!path.startsWith('http')) {
+      if (!File(path).existsSync()) return;
+    }
     _playbackService.play(widget.message.id, path);
   }
 

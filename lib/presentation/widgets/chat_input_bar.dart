@@ -58,10 +58,25 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     _initVoiceDir();
   }
 
+  void _ensureTextFieldFocus() {
+    // When we switch from recorder → text mode on the first keystroke,
+    // the TextField subtree is rebuilt. This can momentarily drop focus
+    // and cause the keyboard to close. Re-request focus on the next frame
+    // so the keyboard stays open while the user continues typing.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && !_textFocusNode.hasFocus) {
+        _textFocusNode.requestFocus();
+      }
+    });
+  }
+
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) {
       setState(() => _hasText = has);
+      if (has) {
+        _ensureTextFieldFocus();
+      }
     }
     if (has) {
       if (!_typingSent) {

@@ -299,6 +299,7 @@ class ChatRemoteDataSource {
           type = MessageType.video;
           break;
         case 'audio':
+        case 'voice': // Treat voice notes as audio messages
           type = MessageType.audio;
           break;
         case 'gif':
