@@ -224,6 +224,14 @@ class ChatCubit extends Cubit<ChatState> {
       _handleMessageSentAck(raw);
       return;
     }
+    if (eventType == 'message_status_update') {
+      _handleMessageStatusUpdate(raw);
+      return;
+    }
+    if (eventType == 'conversation_upserted') {
+      _handleConversationUpserted(raw);
+      return;
+    }
 
     // Only process message events (send_message, new_message, or legacy payload without event)
     final isMessageEvent = eventType == null ||
@@ -470,6 +478,126 @@ class ChatCubit extends Cubit<ChatState> {
       return m;
     }).toList();
     emit(state.copyWith(messages: updatedMessages));
+  }
+
+  void _handleMessageStatusUpdate(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final messageId = _stringFrom(data['message_id']);
+    final conversationId = _stringFrom(data['conversation_id']);
+    final statusStr = _stringFrom(data['status']);
+    if (messageId == null || conversationId == null || statusStr == null) return;
+
+    final status = statusStr == 'read' ? MessageStatus.seen : MessageStatus.delivered;
+
+    _repository.updateMessageStatus(messageId, status);
+
+    if (state.selectedChannel?.id == conversationId) {
+      final updatedMessages = state.messages.map((m) {
+        if (m.id == messageId) return m.copyWith(status: status);
+        return m;
+      }).toList();
+      emit(state.copyWith(messages: updatedMessages));
+    }
+
+    final channels = List<ChatChannel>.from(state.channels);
+    var idx = channels.indexWhere((c) => c.id == conversationId);
+    if (idx != -1) {
+      final channel = channels[idx];
+      if (channel.lastMessageSenderId == AppConstants.currentUserId) {
+        MessageStatus? currentStatus = channel.lastMessageStatus;
+        if (currentStatus == null || currentStatus.index < status.index) {
+          channels[idx] = channel.copyWith(lastMessageStatus: status);
+          emit(state.copyWith(channels: channels));
+          _repository.updateChannelStatus(conversationId, status);
+        }
+      }
+    }
+  }
+
+  void _handleConversationUpserted(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null) return;
+
+    final peerUserId = _stringFrom(data['peer_user_id']);
+    final peerDisplayName = _stringFrom(data['peer_display_name']) ?? 'Unknown';
+    var peerAvatarUrl = _stringFrom(data['peer_avatar_url']) ?? '';
+    if (peerAvatarUrl.isNotEmpty && !peerAvatarUrl.startsWith('http')) {
+      peerAvatarUrl = '${AppConstants.apiBaseUrl}$peerAvatarUrl';
+    }
+
+    final lastMessageText = _stringFrom(data['last_message_text']) ?? '';
+    final lastMessageSender = _stringFrom(data['last_message_sender']);
+    
+    final statusStr = _stringFrom(data['last_message_status']);
+    MessageStatus? lastMessageStatus;
+    if (statusStr == 'read' || statusStr == 'seen') {
+      lastMessageStatus = MessageStatus.seen;
+    } else if (statusStr == 'delivered') {
+      lastMessageStatus = MessageStatus.delivered;
+    } else if (statusStr == 'sent') {
+      lastMessageStatus = MessageStatus.sent;
+    } else if (statusStr == 'sending') {
+      lastMessageStatus = MessageStatus.sending;
+    }
+
+    final timestampRaw = data['last_message_at'];
+    DateTime timestamp = DateTime.now();
+    if (timestampRaw is String) {
+       timestamp = DateTime.tryParse(timestampRaw)?.toLocal() ?? DateTime.now();
+    } else if (timestampRaw is int) {
+       timestamp = DateTime.fromMillisecondsSinceEpoch(timestampRaw, isUtc: true).toLocal();
+    }
+
+    int unreadCount = data['unread_count'] is int ? data['unread_count'] as int : 0;
+    
+    final isOpen = state.selectedChannel?.id == conversationId;
+    if (isOpen) {
+      unreadCount = 0;
+    }
+
+    final channels = List<ChatChannel>.from(state.channels);
+    var idx = channels.indexWhere((c) => c.id == conversationId);
+
+    ChatChannel updated;
+    if (idx != -1) {
+      updated = channels[idx].copyWith(
+        name: peerDisplayName,
+        avatarUrl: peerAvatarUrl,
+        lastMessage: lastMessageText,
+        lastMessageTime: timestamp,
+        lastMessageStatus: lastMessageStatus,
+        lastMessageSenderId: lastMessageSender,
+        unreadCount: unreadCount,
+        peerUserId: peerUserId,
+      );
+      channels[idx] = updated;
+    } else {
+      updated = ChatChannel(
+        id: conversationId,
+        name: peerDisplayName,
+        avatarUrl: peerAvatarUrl,
+        lastMessage: lastMessageText,
+        lastMessageTime: timestamp,
+        lastMessageStatus: lastMessageStatus,
+        lastMessageSenderId: lastMessageSender,
+        unreadCount: unreadCount,
+        peerUserId: peerUserId,
+      );
+      channels.insert(0, updated);
+    }
+
+    channels.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+    _repository.upsertChannel(updated);
+    
+    emit(state.copyWith(channels: channels));
   }
 
   void _handlePresenceUpdate(Map<String, dynamic> raw) {

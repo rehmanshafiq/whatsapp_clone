@@ -516,6 +516,28 @@ class ChatRepository {
     }
   }
 
+  void updateChannelStatus(String channelId, MessageStatus status) {
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == channelId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(lastMessageStatus: status);
+      _storageService.saveChats(chats);
+    }
+  }
+
+  void upsertChannel(ChatChannel channel) {
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == channel.id);
+    if (idx >= 0) {
+      chats[idx] = channel;
+    } else {
+      chats.insert(0, channel);
+    }
+    // Re-sort to maintain order
+    chats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+    _storageService.saveChats(chats);
+  }
+
   void clearUnread(String channelId) {
     final chats = _storageService.getChats();
     final idx = chats.indexWhere((c) => c.id == channelId);

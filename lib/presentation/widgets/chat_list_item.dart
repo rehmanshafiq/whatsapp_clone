@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/chat_channel.dart';
+import '../../data/models/message_status.dart';
 import 'chat_avatar.dart';
 import 'unread_badge.dart';
 
@@ -33,6 +35,20 @@ class ChatListItem extends StatelessWidget {
       return days[time.weekday - 1];
     }
     return '${time.day}/${time.month}/${time.year}';
+  }
+
+  Widget _buildStatusIcon(MessageStatus? status) {
+    if (status == null) return const SizedBox();
+    switch (status) {
+      case MessageStatus.sending:
+        return const Icon(Icons.access_time, size: 14, color: AppColors.textSecondary);
+      case MessageStatus.sent:
+        return const Icon(Icons.done, size: 16, color: AppColors.textSecondary);
+      case MessageStatus.delivered:
+        return const Icon(Icons.done_all, size: 16, color: AppColors.textSecondary);
+      case MessageStatus.seen:
+        return const Icon(Icons.done_all, size: 16, color: AppColors.seenTick);
+    }
   }
 
   @override
@@ -81,10 +97,10 @@ class ChatListItem extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      if (channel.unreadCount == 0 && channel.lastMessage.isNotEmpty)
-                        const Padding(
-                          padding: EdgeInsets.only(right: 4),
-                          child: Icon(Icons.done_all, size: 16, color: AppColors.seenTick),
+                      if (channel.lastMessageSenderId == AppConstants.currentUserId && channel.lastMessage.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(right: 4),
+                          child: _buildStatusIcon(channel.lastMessageStatus),
                         ),
                       Expanded(
                         child: Text(
