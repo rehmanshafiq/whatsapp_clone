@@ -142,9 +142,12 @@ class WebSocketService {
   }
 
   void _sendHeartbeat() {
-    final token = _token;
-    if (!isConnected || token == null) return;
-    send(<String, dynamic>{'token': token});
+    if (!isConnected) return;
+    // WebSocket ping to keep connection and presence TTL alive.
+    send(<String, dynamic>{
+      'event': 'ping',
+      'data': <String, dynamic>{},
+    });
   }
 
   void _scheduleReconnect() {
