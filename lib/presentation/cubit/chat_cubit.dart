@@ -279,8 +279,41 @@ class ChatCubit extends Cubit<ChatState> {
     final isOpen = state.selectedChannel?.id == conversationId;
 
     final channels = List<ChatChannel>.of(state.channels);
-    final idx = channels.indexWhere((c) => c.id == conversationId);
-    if (idx == -1) {
+    var idx = channels.indexWhere((c) => c.id == conversationId);
+
+    // [New Message Processing: Step 2]
+    // If the conversation doesn't exist (first-ever message), create a placeholder
+    if (idx == -1 && eventType == 'new_message') {
+      debugPrint('[ChatCubit] Creating placeholder channel for $conversationId');
+      
+      final senderDisplayName = _stringFrom(data['sender_display_name']) ?? 'Unknown';
+      var senderAvatarUrl = _stringFrom(data['sender_avatar_url']) ?? '';
+      
+      // Some server payloads send relative avatar paths.
+      if (senderAvatarUrl.isNotEmpty && !senderAvatarUrl.startsWith('http')) {
+        senderAvatarUrl = '${AppConstants.apiBaseUrl}$senderAvatarUrl';
+      }
+
+      final newChannel = ChatChannel(
+        id: conversationId,
+        name: senderDisplayName,
+        avatarUrl: senderAvatarUrl,
+        lastMessage: text,
+        lastMessageTime: timestamp,
+        peerUserId: senderId,
+        unreadCount: isOpen ? 0 : 1, // Start with 1 unread if closed
+      );
+
+      channels.insert(0, newChannel);
+      idx = 0; // Point to newly inserted channel
+      
+      // Force save so next lookup finds it locally
+      _repository.createChat(User(
+        id: senderId ?? '', 
+        name: senderDisplayName, 
+        avatarUrl: senderAvatarUrl
+      ));
+    } else if (idx == -1) {
       debugPrint('[ChatCubit] Conversation $conversationId not in local list, reloading...');
       loadChats();
       return;
@@ -369,21 +402,33 @@ class ChatCubit extends Cubit<ChatState> {
       if (!alreadyExists) {
         _repository.addOrUpdateMessage(message);
         updatedMessages = List<Message>.from(state.messages)..add(message);
-        // Send message_delivered when we receive new_message (double grey tick).
-        if (!isOutgoing) {
-          final serverMsgId = _stringFrom(data['message_id']) ??
-              _stringFrom(data['id']) ??
-              message.id;
-          final bucket = _bucketFromTimestamp(timestamp);
-          final senderIdForDelivered = senderId ?? message.senderId;
-          if (senderIdForDelivered.isNotEmpty) {
-            _repository.sendMessageDelivered(
-              messageId: serverMsgId,
-              conversationId: conversationId,
-              bucket: bucket,
-              peerUserId: senderIdForDelivered,
-            );
-          }
+      }
+    }
+
+    // [New Message Processing: Step 4 / 5]
+    // Send delivered / read receipts correctly mapped by sender_id bucket
+    if (eventType == 'new_message' && !isOutgoing) {
+      final serverMsgId = _stringFrom(data['message_id']) ?? _stringFrom(data['id']) ?? 'unknown';
+      final bucket = _stringFrom(data['bucket']) ?? _bucketFromTimestamp(timestamp);
+      final senderIdForDelivered = senderId ?? 'unknown';
+
+      if (senderIdForDelivered.isNotEmpty && serverMsgId != 'unknown') {
+         // Step 4: Send text delivered successfully
+        _repository.sendMessageDelivered(
+          messageId: serverMsgId,
+          conversationId: conversationId,
+          bucket: bucket,
+          peerUserId: senderIdForDelivered,
+        );
+
+        // Step 5: Send read if open
+        if (isOpen) {
+           _repository.sendMessageRead(
+            messageId: serverMsgId,
+            conversationId: conversationId,
+            bucket: bucket,
+            peerUserId: senderIdForDelivered,
+          );
         }
       }
     }
