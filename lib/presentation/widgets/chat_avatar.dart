@@ -30,7 +30,16 @@ class ChatAvatar extends StatelessWidget {
   Widget _buildAvatar() {
     final url = imageUrl;
     if (url != null && url.isNotEmpty) {
-      final isSvg = url.toLowerCase().contains('.svg');
+      final lowerUrl = url.toLowerCase();
+      final isHttpUrl =
+          lowerUrl.startsWith('http://') || lowerUrl.startsWith('https://');
+
+      if (!isHttpUrl) {
+        return _PlaceholderAvatar(name: name, radius: radius);
+      }
+
+      final isSvg = _isSvgPath(lowerUrl); // ← unified check
+
       if (isSvg) {
         return CircleAvatar(
           radius: radius,
@@ -62,6 +71,11 @@ class ChatAvatar extends StatelessWidget {
       );
     }
     return _PlaceholderAvatar(name: name, radius: radius);
+  }
+
+  bool _isSvgPath(String lowerUrl) {
+    final path = Uri.tryParse(lowerUrl)?.path ?? '';
+    return path.endsWith('/svg') || path.endsWith('.svg');
   }
 }
 

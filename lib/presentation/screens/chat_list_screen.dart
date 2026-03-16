@@ -113,7 +113,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       } else if (diffDays == 1) {
         return 'Last seen yesterday at $time';
       } else {
-        return 'Last seen on ${dt.day}/${dt.month}/${dt.year} at $time';
+        return 'Tap to start chatting';
       }
     }
     return null;
