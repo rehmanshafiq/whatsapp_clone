@@ -244,15 +244,12 @@ class _AuthScreenState extends State<AuthScreen>
                           ),
                         ),
                         const SizedBox(height: 24),
-                        SizedBox(
-                          height: 420,
-                          child: TabBarView(
-                            controller: _tabController,
-                            children: <Widget>[
-                              _buildLoginForm(context, state),
-                              _buildSignUpForm(context, state),
-                            ],
-                          ),
+                        IndexedStack(
+                          index: _tabController.index,
+                          children: <Widget>[
+                            _buildLoginForm(context, state),
+                            _buildSignUpForm(context, state),
+                          ],
                         ),
                       ],
                     ),
