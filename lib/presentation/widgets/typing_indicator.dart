@@ -50,35 +50,38 @@ class _TypingIndicatorState extends State<TypingIndicator>
 
   @override
   Widget build(BuildContext context) {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        margin: const EdgeInsets.only(left: 8, bottom: 4),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        decoration: BoxDecoration(
-          color: AppColors.incomingBubble,
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: List.generate(3, (i) {
-            return AnimatedBuilder(
-              animation: _animations[i],
-              builder: (_, child) => Transform.translate(
-                offset: Offset(0, _animations[i].value),
-                child: child,
-              ),
-              child: Container(
-                width: 8,
-                height: 8,
-                margin: const EdgeInsets.symmetric(horizontal: 2),
-                decoration: BoxDecoration(
-                  color: AppColors.textSecondary.withValues(alpha: 0.6),
-                  shape: BoxShape.circle,
+    return Padding(
+      padding: const EdgeInsets.only(top: 12.0),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Container(
+          margin: const EdgeInsets.only(left: 8, bottom: 4),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          decoration: BoxDecoration(
+            color: AppColors.incomingBubble,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: List.generate(3, (i) {
+              return AnimatedBuilder(
+                animation: _animations[i],
+                builder: (_, child) => Transform.translate(
+                  offset: Offset(0, _animations[i].value),
+                  child: child,
                 ),
-              ),
-            );
-          }),
+                child: Container(
+                  width: 8,
+                  height: 8,
+                  margin: const EdgeInsets.symmetric(horizontal: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.textSecondary.withValues(alpha: 0.6),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+              );
+            }),
+          ),
         ),
       ),
     );
