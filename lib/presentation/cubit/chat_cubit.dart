@@ -35,6 +35,19 @@ class ChatCubit extends Cubit<ChatState> {
   }
   ChatRepository get repository => _repository;
 
+  Future<void> loadCurrentUserProfile() async {
+    try {
+      final profile = await _repository.fetchCurrentUserProfile();
+      if (!isClosed) {
+        emit(state.copyWith(currentUserProfile: profile));
+      }
+    } on ApiException {
+      // Silent failure – avatar fallback will be used.
+    } catch (_) {
+      // Ignore generic errors for profile load to avoid blocking chat list.
+    }
+  }
+
   Future<void> loadChats() async {
     emit(state.copyWith(isLoading: true, clearError: true));
     try {
@@ -58,6 +71,29 @@ class ChatCubit extends Cubit<ChatState> {
       if (!isClosed) emit(state.copyWith(channels: chats));
     } catch (_) {
       // Silent fail for background refresh
+    }
+  }
+
+  Future<UserSearchResult?> updateCurrentUserProfile({
+    required String displayName,
+    required String statusText,
+    required String avatarUrl,
+  }) async {
+    try {
+      final updated = await _repository.updateCurrentUserProfile(
+        current: state.currentUserProfile,
+        displayName: displayName,
+        avatarUrl: avatarUrl,
+        statusText: statusText,
+      );
+      if (!isClosed) {
+        emit(state.copyWith(currentUserProfile: updated));
+      }
+      return updated;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
     }
   }
 

@@ -5,6 +5,8 @@ import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/di/service_locator.dart';
+import '../../core/constants/app_constants.dart';
+import '../../data/models/user_search.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/repository/auth_repository.dart';
@@ -56,7 +58,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       context.goNamed(AppRouter.auth);
       return;
     }
-    context.read<ChatCubit>().loadChats();
+    final cubit = context.read<ChatCubit>();
+    await cubit.loadChats();
+    // Load current user's profile so AppBar avatar can be shown.
+    // Errors are handled silently inside the cubit.
+    await cubit.loadCurrentUserProfile();
   }
 
   void _toggleSearch(ChatCubit cubit) {
@@ -142,7 +148,43 @@ class _ChatListScreenState extends State<ChatListScreen> {
                 ),
                 onChanged: (value) => _onSearchChanged(cubit, value),
               )
-            : const Text('WhatsApp'),
+            : BlocBuilder<ChatCubit, ChatState>(
+                buildWhen: (previous, current) =>
+                    previous.currentUserProfile != current.currentUserProfile,
+                builder: (context, state) {
+                  final profile = state.currentUserProfile;
+                  final displayName = (profile?.displayName.isNotEmpty == true)
+                      ? profile!.displayName
+                      : 'You';
+                  final avatarUrl = profile?.avatarUrl;
+
+                  return GestureDetector(
+                    onTap: profile == null
+                        ? null
+                        : () => _showEditProfileDialog(
+                              context.read<ChatCubit>(),
+                              profile,
+                            ),
+                    child: Row(
+                      children: [
+                        ChatAvatar(
+                          imageUrl: avatarUrl,
+                          name: displayName,
+                          radius: 18,
+                        ),
+                        const SizedBox(width: 12),
+                        const Text(
+                          'WhatsApp',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
         actions: [
           IconButton(
             icon: Icon(
@@ -374,6 +416,250 @@ class _ChatListScreenState extends State<ChatListScreen> {
       //   onPressed: () => context.goNamed(AppRouter.contacts),
       //   child: const Icon(Icons.chat, color: Colors.white),
       // ),
+    );
+  }
+
+  Future<void> _showEditProfileDialog(
+    ChatCubit cubit,
+    UserSearchResult profile,
+  ) async {
+    final rootContext = context;
+
+    final displayNameController =
+        TextEditingController(text: profile.displayName);
+    final statusController =
+        TextEditingController(text: profile.statusText ?? '');
+
+    String selectedAvatarUrl = profile.avatarUrl;
+    bool isSaving = false;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: AppColors.appBar,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (bottomSheetContext) {
+        return StatefulBuilder(
+          builder: (context, setState) {
+            Future<void> handleSave() async {
+              if (isSaving) return;
+              setState(() {
+                isSaving = true;
+              });
+              try {
+                await cubit.updateCurrentUserProfile(
+                  displayName: displayNameController.text.trim(),
+                  statusText: statusController.text.trim(),
+                  avatarUrl: selectedAvatarUrl,
+                );
+                if (Navigator.of(bottomSheetContext).canPop()) {
+                  Navigator.of(bottomSheetContext).pop();
+                }
+              } catch (_) {
+                ScaffoldMessenger.of(rootContext).showSnackBar(
+                  const SnackBar(
+                    content: Text('Profile update failed'),
+                  ),
+                );
+              } finally {
+                setState(() {
+                  isSaving = false;
+                });
+              }
+            }
+
+            final avatarOptions = <String>[
+              if (profile.avatarUrl.isNotEmpty) profile.avatarUrl,
+              ...AppConstants.placeholderAvatars,
+            ].toSet().toList();
+
+            return Padding(
+              padding: EdgeInsets.only(
+                left: 16,
+                right: 16,
+                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                top: 16,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      const Text(
+                        'Edit Profile',
+                        style: TextStyle(
+                          color: AppColors.textPrimary,
+                          fontSize: 18,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      IconButton(
+                        icon: const Icon(
+                          Icons.close,
+                          color: AppColors.iconMuted,
+                        ),
+                        onPressed: () => Navigator.of(bottomSheetContext).pop(),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Center(
+                    child: ChatAvatar(
+                      imageUrl: selectedAvatarUrl,
+                      name: profile.displayName,
+                      radius: 32,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  SizedBox(
+                    height: 72,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: avatarOptions.length + 1,
+                      separatorBuilder: (_, __) => const SizedBox(width: 12),
+                      itemBuilder: (context, index) {
+                        if (index == avatarOptions.length) {
+                          return GestureDetector(
+                            onTap: () {
+                              ScaffoldMessenger.of(rootContext).showSnackBar(
+                                const SnackBar(
+                                  content:
+                                      Text('Avatar upload not implemented'),
+                                ),
+                              );
+                            },
+                            child: CircleAvatar(
+                              radius: 24,
+                              backgroundColor: AppColors.chatBackground,
+                              child: const Icon(
+                                Icons.upload,
+                                color: AppColors.iconMuted,
+                              ),
+                            ),
+                          );
+                        }
+                        final option = avatarOptions[index];
+                        final isSelected = option == selectedAvatarUrl;
+                        return GestureDetector(
+                          onTap: () {
+                            setState(() {
+                              selectedAvatarUrl = option;
+                            });
+                          },
+                          child: Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isSelected
+                                    ? AppColors.accent
+                                    : Colors.transparent,
+                                width: 2,
+                              ),
+                            ),
+                            padding: const EdgeInsets.all(2),
+                            child: ChatAvatar(
+                              imageUrl: option,
+                              name: profile.displayName,
+                              radius: 24,
+                            ),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  _buildProfileTextField(
+                    label: 'Display Name',
+                    controller: displayNameController,
+                    enabled: true,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildProfileTextField(
+                    label: 'Status',
+                    controller: statusController,
+                    enabled: true,
+                  ),
+                  const SizedBox(height: 12),
+                  _buildProfileTextField(
+                    label: 'Username (cannot be changed)',
+                    controller:
+                        TextEditingController(text: profile.username),
+                    enabled: false,
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppColors.accent,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                      ),
+                      onPressed: handleSave,
+                      child: const Text(
+                        'Save Changes',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  Widget _buildProfileTextField({
+    required String label,
+    required TextEditingController controller,
+    required bool enabled,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textSecondary,
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 6),
+        TextField(
+          controller: controller,
+          enabled: enabled,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: AppColors.chatBackground,
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.divider),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.divider),
+            ),
+            disabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(12),
+              borderSide: const BorderSide(color: AppColors.divider),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -19,6 +19,8 @@ class ChatRepository {
   final StorageService _storageService;
   final WebSocketService _webSocketService;
 
+  UserSearchResult? _cachedCurrentUserProfile;
+
   ChatRepository(
     this._remoteDataSource,
     this._storageService,
@@ -30,6 +32,29 @@ class ChatRepository {
   /// Current user's id from backend (stored at login). Used to normalize
   /// message senderId so UI can show sent (right) vs received (left).
   String? getCurrentUserId() => _storageService.getUserId();
+
+  UserSearchResult? get currentUserProfile => _cachedCurrentUserProfile;
+
+  Future<UserSearchResult> fetchCurrentUserProfile() async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final profile =
+          await _remoteDataSource.fetchCurrentUserProfile(token: token);
+      _cachedCurrentUserProfile = profile;
+      return profile;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
 
   Future<List<ChatChannel>> getChats() async {
     try {
@@ -634,6 +659,54 @@ class ChatRepository {
   Future<List<User>> getContacts() async {
     try {
       return await _remoteDataSource.fetchContacts();
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<UserSearchResult> updateCurrentUserProfile({
+    required UserSearchResult? current,
+    String? displayName,
+    String? avatarUrl,
+    String? statusText,
+  }) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final Map<String, dynamic> body = <String, dynamic>{};
+      if (displayName != null &&
+          displayName.isNotEmpty &&
+          displayName != current?.displayName) {
+        body['display_name'] = displayName;
+      }
+      if (avatarUrl != null &&
+          avatarUrl.isNotEmpty &&
+          avatarUrl != current?.avatarUrl) {
+        body['avatar_url'] = avatarUrl;
+      }
+      if (statusText != null && statusText != current?.statusText) {
+        body['status_text'] = statusText;
+      }
+
+      if (body.isEmpty && current != null) {
+        _cachedCurrentUserProfile = current;
+        return current;
+      }
+
+      final updated = await _remoteDataSource.updateUserProfile(
+        token: token,
+        body: body,
+      );
+      _cachedCurrentUserProfile = updated;
+      return updated;
     } on ApiException {
       rethrow;
     } catch (e) {

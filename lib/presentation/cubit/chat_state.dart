@@ -18,6 +18,9 @@ class ChatState extends Equatable {
   final bool isUserSearchLoading;
   final String? userSearchError;
 
+  /// Profile of the currently authenticated user (used for AppBar avatar).
+  final UserSearchResult? currentUserProfile;
+
   const ChatState({
     this.channels = const [],
     this.messages = const [],
@@ -31,6 +34,7 @@ class ChatState extends Equatable {
     this.userSearchResults = const [],
     this.isUserSearchLoading = false,
     this.userSearchError,
+    this.currentUserProfile,
   });
 
   ChatState copyWith({
@@ -49,6 +53,7 @@ class ChatState extends Equatable {
     bool? isUserSearchLoading,
     String? userSearchError,
     bool clearUserSearchError = false,
+    UserSearchResult? currentUserProfile,
   }) {
     return ChatState(
       channels: channels ?? this.channels,
@@ -67,6 +72,7 @@ class ChatState extends Equatable {
       userSearchError: clearUserSearchError
           ? null
           : (userSearchError ?? this.userSearchError),
+      currentUserProfile: currentUserProfile ?? this.currentUserProfile,
     );
   }
 
@@ -96,5 +102,6 @@ class ChatState extends Equatable {
     userSearchResults,
     isUserSearchLoading,
     userSearchError,
+    currentUserProfile,
   ];
 }
