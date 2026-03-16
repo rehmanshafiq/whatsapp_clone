@@ -196,21 +196,51 @@ class _AuthScreenState extends State<AuthScreen>
                         const SizedBox(height: 24),
                         Container(
                           decoration: BoxDecoration(
-                            color: AppColors.appBar,
-                            borderRadius: BorderRadius.circular(24),
-                          ),
-                          child: TabBar(
-                            controller: _tabController,
-                            indicator: BoxDecoration(
-                              color: AppColors.scaffold,
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            labelColor: AppColors.textPrimary,
-                            unselectedLabelColor: AppColors.textSecondary,
-                            tabs: const <Widget>[
-                              Tab(text: 'Login'),
-                              Tab(text: 'Sign up'),
+                            color: Colors.transparent,
+                            borderRadius: BorderRadius.circular(999),
+                            boxShadow: const <BoxShadow>[
+                              BoxShadow(
+                                color: Colors.black54,
+                                blurRadius: 18,
+                                spreadRadius: -6,
+                                offset: Offset(0, 10),
+                              ),
                             ],
+                          ),
+                          child: Container(
+                            decoration: BoxDecoration(
+                              color: AppColors.appBar,
+                              borderRadius: BorderRadius.circular(999),
+                            ),
+                            padding: const EdgeInsets.all(4),
+                            child: TabBar(
+                              controller: _tabController,
+                              indicatorSize: TabBarIndicatorSize.tab,
+                              indicator: BoxDecoration(
+                                borderRadius: BorderRadius.circular(999),
+                                color: AppColors.accent.withOpacity(0.18),
+                              ),
+                              dividerColor: Colors.transparent,
+                              labelColor: AppColors.textPrimary,
+                              unselectedLabelColor: AppColors.textSecondary,
+                              labelStyle: const TextStyle(
+                                fontWeight: FontWeight.w700,
+                                fontSize: 14,
+                                letterSpacing: 0.2,
+                              ),
+                              unselectedLabelStyle: const TextStyle(
+                                fontWeight: FontWeight.w500,
+                                fontSize: 14,
+                              ),
+                              overlayColor: MaterialStateProperty.all<Color>(
+                                Colors.transparent,
+                              ),
+                              splashFactory: NoSplash.splashFactory,
+                              tabs: const <Widget>[
+                                Tab(text: 'Login'),
+                                Tab(text: 'Sign up'),
+                              ],
+                            ),
                           ),
                         ),
                         const SizedBox(height: 24),
@@ -240,6 +270,8 @@ class _AuthScreenState extends State<AuthScreen>
     final cubit = context.read<AuthCubit>();
 
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 32),
       child: Form(
         key: _loginFormKey,
         child: Column(
@@ -320,6 +352,8 @@ class _AuthScreenState extends State<AuthScreen>
     final cubit = context.read<AuthCubit>();
 
     return SingleChildScrollView(
+      physics: const BouncingScrollPhysics(),
+      padding: const EdgeInsets.only(bottom: 32),
       child: Form(
         key: _signupFormKey,
         child: Column(
