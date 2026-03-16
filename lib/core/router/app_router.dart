@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../data/repository/auth_repository.dart';
 import '../../presentation/screens/chat_detail_screen.dart';
 import '../../presentation/screens/chat_list_screen.dart';
 import '../../presentation/screens/select_contact_screen.dart';
@@ -13,9 +14,22 @@ class AppRouter {
   static const String contacts = 'contacts';
   static const String auth = 'auth';
 
-  static GoRouter create(bool isAuthenticated) {
+  static GoRouter create(AuthRepository authRepository) {
     return GoRouter(
-      initialLocation: isAuthenticated ? '/chats' : '/auth',
+      initialLocation: authRepository.isAuthenticated ? '/chats' : '/auth',
+      refreshListenable: authRepository.authStateListenable,
+      redirect: (context, state) {
+        final isAuthenticated = authRepository.isAuthenticated;
+        final isAuthRoute = state.matchedLocation == '/auth';
+
+        if (!isAuthenticated && !isAuthRoute) {
+          return '/auth';
+        }
+        if (isAuthenticated && isAuthRoute) {
+          return '/chats';
+        }
+        return null;
+      },
       routes: [
         GoRoute(
           path: '/auth',

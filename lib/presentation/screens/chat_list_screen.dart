@@ -29,18 +29,34 @@ class _ChatListScreenState extends State<ChatListScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(_lifecycleObserver);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      final cubit = context.read<ChatCubit>();
-      cubit.loadChats();
+      _checkSessionAndLoadChats();
     });
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(_lifecycleObserver);
     _searchDebounce?.cancel();
     _searchController.dispose();
     super.dispose();
+  }
+
+  late final _ChatListLifecycleObserver _lifecycleObserver =
+      _ChatListLifecycleObserver(() async {
+        await getIt<AuthRepository>().validateOrLogoutExpiredSession();
+      });
+
+  Future<void> _checkSessionAndLoadChats() async {
+    await getIt<AuthRepository>().validateOrLogoutExpiredSession();
+    if (!mounted) return;
+    if (!getIt<AuthRepository>().isAuthenticated) {
+      context.goNamed(AppRouter.auth);
+      return;
+    }
+    context.read<ChatCubit>().loadChats();
   }
 
   void _toggleSearch(ChatCubit cubit) {
@@ -147,8 +163,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
           if (previous.isLoading != current.isLoading) return true;
           if (previous.error != current.error) return true;
           if (previous.searchQuery != current.searchQuery) return true;
-          if (previous.userSearchResults != current.userSearchResults) return true;
-          if (previous.isUserSearchLoading != current.isUserSearchLoading) return true;
+          if (previous.userSearchResults != current.userSearchResults) {
+            return true;
+          }
+          if (previous.isUserSearchLoading != current.isUserSearchLoading) {
+            return true;
+          }
           if (previous.userSearchError != current.userSearchError) return true;
           // Equatable equality on lists inside ChatState will trigger build
           if (previous.channels != current.channels) return true;
@@ -349,11 +369,24 @@ class _ChatListScreenState extends State<ChatListScreen> {
           );
         },
       ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: AppColors.accent,
-        onPressed: () => context.goNamed(AppRouter.contacts),
-        child: const Icon(Icons.chat, color: Colors.white),
-      ),
+      // floatingActionButton: FloatingActionButton(
+      //   backgroundColor: AppColors.accent,
+      //   onPressed: () => context.goNamed(AppRouter.contacts),
+      //   child: const Icon(Icons.chat, color: Colors.white),
+      // ),
     );
+  }
+}
+
+class _ChatListLifecycleObserver extends WidgetsBindingObserver {
+  _ChatListLifecycleObserver(this.onResumed);
+
+  final Future<void> Function() onResumed;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      onResumed();
+    }
   }
 }

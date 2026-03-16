@@ -6,7 +6,7 @@ import 'package:get_storage/get_storage.dart';
 import 'core/di/service_locator.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
-import 'core/constants/app_constants.dart';
+import 'data/repository/auth_repository.dart';
 import 'presentation/cubit/chat_cubit.dart';
 
 Future<void> main() async {
@@ -14,19 +14,40 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env');
   await GetStorage.init();
   setupLocator();
-
-  final box = GetStorage();
-  final token = box.read<String>(AppConstants.storageTokenKey);
-  final userId = box.read<String>(AppConstants.storageUserIdKey);
-  final isAuthenticated = token != null && userId != null;
-
-  runApp(WhatsAppClone(isAuthenticated: isAuthenticated));
+  await getIt<AuthRepository>().initializeSession();
+  runApp(const WhatsAppClone());
 }
 
-class WhatsAppClone extends StatelessWidget {
-  const WhatsAppClone({super.key, required this.isAuthenticated});
+class WhatsAppClone extends StatefulWidget {
+  const WhatsAppClone({super.key});
 
-  final bool isAuthenticated;
+  @override
+  State<WhatsAppClone> createState() => _WhatsAppCloneState();
+}
+
+class _WhatsAppCloneState extends State<WhatsAppClone>
+    with WidgetsBindingObserver {
+  late final AuthRepository _authRepository;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _authRepository = getIt<AuthRepository>();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _authRepository.validateOrLogoutExpiredSession();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -36,7 +57,7 @@ class WhatsAppClone extends StatelessWidget {
         title: 'WhatsApp Clone',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.dark,
-        routerConfig: AppRouter.create(isAuthenticated),
+        routerConfig: AppRouter.create(_authRepository),
       ),
     );
   }

@@ -127,7 +127,7 @@ class _AuthScreenState extends State<AuthScreen>
     final titleText = isLoginTab ? 'Sign in' : 'Create account';
 
     return BlocProvider<AuthCubit>(
-      create: (_) => getIt<AuthCubit>(),
+      create: (_) => getIt<AuthCubit>()..checkExistingSession(),
       child: BlocConsumer<AuthCubit, AuthState>(
         listener: (BuildContext context, AuthState state) {
           if (state.errorMessage != null && state.errorMessage!.isNotEmpty) {
@@ -151,7 +151,10 @@ class _AuthScreenState extends State<AuthScreen>
             body: SafeArea(
               child: Center(
                 child: SingleChildScrollView(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 24,
+                    vertical: 16,
+                  ),
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 420),
                     child: Column(
@@ -159,18 +162,19 @@ class _AuthScreenState extends State<AuthScreen>
                       children: <Widget>[
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 250),
-                          transitionBuilder: (Widget child, Animation<double> animation) {
-                            return FadeTransition(
-                              opacity: animation,
-                              child: SlideTransition(
-                                position: Tween<Offset>(
-                                  begin: const Offset(0, 0.1),
-                                  end: Offset.zero,
-                                ).animate(animation),
-                                child: child,
-                              ),
-                            );
-                          },
+                          transitionBuilder:
+                              (Widget child, Animation<double> animation) {
+                                return FadeTransition(
+                                  opacity: animation,
+                                  child: SlideTransition(
+                                    position: Tween<Offset>(
+                                      begin: const Offset(0, 0.1),
+                                      end: Offset.zero,
+                                    ).animate(animation),
+                                    child: child,
+                                  ),
+                                );
+                              },
                           child: Text(
                             titleText,
                             key: ValueKey<String>(titleText),
@@ -275,7 +279,9 @@ class _AuthScreenState extends State<AuthScreen>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed: state.isLoading ? null : () => _onLogin(cubit, state),
+                onPressed: state.isLoading
+                    ? null
+                    : () => _onLogin(cubit, state),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
                   foregroundColor: Colors.black,
@@ -374,8 +380,9 @@ class _AuthScreenState extends State<AuthScreen>
             SizedBox(
               width: double.infinity,
               child: ElevatedButton(
-                onPressed:
-                    state.isLoading ? null : () => _onSignUp(cubit, state),
+                onPressed: state.isLoading
+                    ? null
+                    : () => _onSignUp(cubit, state),
                 style: ElevatedButton.styleFrom(
                   backgroundColor: AppColors.accent,
                   foregroundColor: Colors.black,
@@ -509,13 +516,8 @@ class _AuthScreenState extends State<AuthScreen>
         ),
       ),
       child: const Center(
-        child: Icon(
-          Icons.upload,
-          color: AppColors.iconMuted,
-          size: 22,
-        ),
+        child: Icon(Icons.upload, color: AppColors.iconMuted, size: 22),
       ),
     );
   }
 }
-

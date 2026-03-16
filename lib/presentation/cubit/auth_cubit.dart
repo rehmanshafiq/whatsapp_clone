@@ -5,9 +5,21 @@ import '../../data/repository/auth_repository.dart';
 import 'auth_state.dart';
 
 class AuthCubit extends Cubit<AuthState> {
-  AuthCubit(this._repository) : super(const AuthState());
+  AuthCubit(AuthRepository repository)
+    : _repository = repository,
+      super(AuthState(isAuthenticated: repository.isAuthenticated));
 
   final AuthRepository _repository;
+
+  Future<void> checkExistingSession() async {
+    await _repository.validateOrLogoutExpiredSession();
+    emit(
+      state.copyWith(
+        isAuthenticated: _repository.isAuthenticated,
+        clearError: true,
+      ),
+    );
+  }
 
   Future<void> login({
     required String username,
@@ -21,23 +33,13 @@ class AuthCubit extends Cubit<AuthState> {
       emit(
         state.copyWith(
           isLoading: false,
-          isAuthenticated: true,
+          isAuthenticated: _repository.isAuthenticated,
         ),
       );
     } on ApiException catch (e) {
-      emit(
-        state.copyWith(
-          isLoading: false,
-          errorMessage: e.message,
-        ),
-      );
+      emit(state.copyWith(isLoading: false, errorMessage: e.message));
     } catch (e) {
-      emit(
-        state.copyWith(
-          isLoading: false,
-          errorMessage: e.toString(),
-        ),
-      );
+      emit(state.copyWith(isLoading: false, errorMessage: e.toString()));
     }
   }
 
@@ -60,24 +62,30 @@ class AuthCubit extends Cubit<AuthState> {
       emit(
         state.copyWith(
           isLoading: false,
-          isAuthenticated: true,
+          isAuthenticated: _repository.isAuthenticated,
         ),
       );
     } on ApiException catch (e) {
-      emit(
-        state.copyWith(
-          isLoading: false,
-          errorMessage: e.message,
-        ),
-      );
+      emit(state.copyWith(isLoading: false, errorMessage: e.message));
+    } catch (e) {
+      emit(state.copyWith(isLoading: false, errorMessage: e.toString()));
+    }
+  }
+
+  Future<void> logout() async {
+    if (state.isLoading) return;
+    emit(state.copyWith(isLoading: true, clearError: true));
+    try {
+      await _repository.logout();
+      emit(state.copyWith(isLoading: false, isAuthenticated: false));
     } catch (e) {
       emit(
         state.copyWith(
           isLoading: false,
+          isAuthenticated: false,
           errorMessage: e.toString(),
         ),
       );
     }
   }
 }
-

@@ -16,12 +16,14 @@ import '../network/dio_api_client.dart';
 final getIt = GetIt.instance;
 
 void setupLocator() {
-  // Auth / real backend client
-  getIt.registerLazySingleton<DioApiClient>(() => DioApiClient());
   getIt.registerLazySingleton<StorageService>(
     () => StorageService(GetStorage()),
   );
   getIt.registerLazySingleton<WebSocketService>(() => WebSocketService());
+  // Auth / real backend client
+  getIt.registerLazySingleton<DioApiClient>(
+    () => DioApiClient(getIt<StorageService>()),
+  );
   getIt.registerLazySingleton<AuthRemoteDataSource>(
     () => AuthRemoteDataSource(getIt<DioApiClient>().dio),
   );
@@ -40,8 +42,12 @@ void setupLocator() {
       getIt<AuthRemoteDataSource>(),
       getIt<StorageService>(),
       getIt<WebSocketService>(),
+      getIt<DioApiClient>(),
     ),
   );
+  getIt<DioApiClient>().setUnauthorizedHandler(() async {
+    await getIt<AuthRepository>().handleUnauthorized();
+  });
   getIt.registerLazySingleton<AudioPlaybackService>(
     () => AudioPlaybackService(),
   );
