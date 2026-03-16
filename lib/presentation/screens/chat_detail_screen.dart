@@ -100,11 +100,14 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<ChatCubit, ChatState>(
-      // Rebuild when messages change (e.g. new socket message) or loading state.
+      // Rebuild when messages change (e.g. new socket message), loading state,
+      // or presence/typing status (so "online" and "typing..." update in real time).
       buildWhen: (prev, curr) =>
           prev.messages != curr.messages ||
           prev.selectedChannel != curr.selectedChannel ||
-          prev.isLoading != curr.isLoading,
+          prev.isLoading != curr.isLoading ||
+          prev.isTyping != curr.isTyping ||
+          prev.isOnline != curr.isOnline,
       // Also fire when loading finishes so the initial load scrolls correctly.
       listenWhen: (prev, curr) =>
           prev.messages.length != curr.messages.length ||

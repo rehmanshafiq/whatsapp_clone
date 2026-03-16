@@ -167,11 +167,19 @@ class ChatCubit extends Cubit<ChatState> {
           }
           return m;
         }).toList();
+        // Preserve isOnline from state.channels (updated by presence_update) or
+        // state.isOnline, since repo may have stale data. Otherwise "online"
+        // disappears when loadMessages completes after a presence event.
+        final channelFromState =
+            state.channels.where((c) => c.id == channelId).firstOrNull;
+        final effectiveIsOnline = channelFromState?.isOnline ??
+            (state.selectedChannel?.id == channelId ? state.isOnline : null) ??
+            channel.isOnline;
         emit(
           state.copyWith(
             messages: messagesWithSeen,
             selectedChannel: channel.copyWith(unreadCount: 0),
-            isOnline: channel.isOnline,
+            isOnline: effectiveIsOnline,
             isLoading: false,
             channels: updatedChats,
           ),
@@ -733,19 +741,23 @@ class ChatCubit extends Cubit<ChatState> {
     for (var i = 0; i < channels.length; i++) {
       final c = channels[i];
       if (c.peerUserId == userId) {
-        channels[i] = c.copyWith(
+        final updatedChannel = c.copyWith(
           isOnline: isOnline,
           lastSeen: lastSeen ?? c.lastSeen,
         );
+        channels[i] = updatedChannel;
+        _repository.upsertChannel(updatedChannel);
         updated = true;
         break;
       }
       if (c.id == 'channel_$userId') {
-        channels[i] = c.copyWith(
+        final updatedChannel = c.copyWith(
           isOnline: isOnline,
           lastSeen: lastSeen ?? c.lastSeen,
           peerUserId: c.peerUserId ?? userId,
         );
+        channels[i] = updatedChannel;
+        _repository.upsertChannel(updatedChannel);
         updated = true;
         break;
       }
@@ -1156,7 +1168,14 @@ class ChatCubit extends Cubit<ChatState> {
           .getChannel(state.selectedChannel?.id ?? '')
           ?.let((ch) {
             final allChats = state.channels.map((c) {
-              if (c.id == ch.id) return _repository.getChannel(c.id) ?? c;
+              if (c.id == ch.id) {
+                final repoChannel = _repository.getChannel(c.id) ?? c;
+                // Preserve isOnline/lastSeen from state (presence_update) since repo has stale data
+                return repoChannel.copyWith(
+                  isOnline: c.isOnline,
+                  lastSeen: c.lastSeen,
+                );
+              }
               return c;
             }).toList();
             allChats.sort(
