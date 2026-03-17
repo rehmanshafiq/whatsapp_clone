@@ -157,10 +157,28 @@ class ChatCubit extends Cubit<ChatState> {
             }
           }
         }
+        // Fetch presence (online, last_seen) from API for initial load.
+        final channelWithPresence =
+            await _repository.fetchPresenceForChannel(channelId);
+        final effectiveChannel = (channelWithPresence ?? channel).copyWith(
+          unreadCount: 0,
+        );
         final updatedChats = await _repository.getChats();
         updatedChats.sort(
           (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
         );
+        // Preserve presence (API getChats may not include lastSeen).
+        if (channelWithPresence != null) {
+          final idx = updatedChats.indexWhere((c) => c.id == channelId);
+          if (idx >= 0) {
+            final merged = updatedChats[idx].copyWith(
+              isOnline: channelWithPresence.isOnline,
+              lastSeen: channelWithPresence.lastSeen,
+            );
+            updatedChats[idx] = merged;
+            _repository.upsertChannel(merged);
+          }
+        }
         final messagesWithSeen = messages.map((m) {
           if (!m.isOutgoing && m.status != MessageStatus.seen) {
             return m.copyWith(status: MessageStatus.seen);
@@ -174,11 +192,11 @@ class ChatCubit extends Cubit<ChatState> {
             state.channels.where((c) => c.id == channelId).firstOrNull;
         final effectiveIsOnline = channelFromState?.isOnline ??
             (state.selectedChannel?.id == channelId ? state.isOnline : null) ??
-            channel.isOnline;
+            effectiveChannel.isOnline;
         emit(
           state.copyWith(
             messages: messagesWithSeen,
-            selectedChannel: channel.copyWith(unreadCount: 0),
+            selectedChannel: effectiveChannel,
             isOnline: effectiveIsOnline,
             isLoading: false,
             channels: updatedChats,

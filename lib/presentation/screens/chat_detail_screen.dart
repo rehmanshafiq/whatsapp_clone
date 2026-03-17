@@ -51,6 +51,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.dispose();
   }
 
+  String _formatLastSeen(DateTime? lastSeen) {
+    if (lastSeen == null) return 'last seen recently';
+    final local = lastSeen.isUtc ? lastSeen.toLocal() : lastSeen;
+    final hour = local.hour;
+    final minute = local.minute;
+    final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
+    final ampm = hour >= 12 ? 'PM' : 'AM';
+    final timeStr = '$hour12:${minute.toString().padLeft(2, '0')} $ampm';
+    return 'last seen $timeStr';
+  }
+
   void _handleScroll() {
     if (!_scrollController.hasClients) return;
     final position = _scrollController.position;
@@ -107,7 +118,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.selectedChannel != curr.selectedChannel ||
           prev.isLoading != curr.isLoading ||
           prev.isTyping != curr.isTyping ||
-          prev.isOnline != curr.isOnline,
+          prev.isOnline != curr.isOnline ||
+          prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen,
       // Also fire when loading finishes so the initial load scrolls correctly.
       listenWhen: (prev, curr) =>
           prev.messages.length != curr.messages.length ||
@@ -176,10 +188,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               style: TextStyle(
                                   color: AppColors.accent, fontSize: 12))
                         else
-                          const Text('last seen recently',
-                              style: TextStyle(
-                                  color: AppColors.textSecondary,
-                                  fontSize: 12)),
+                          Text(
+                            _formatLastSeen(channel?.lastSeen),
+                            style: const TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          ),
                       ],
                     ),
                   ),

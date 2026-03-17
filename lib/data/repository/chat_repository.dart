@@ -720,6 +720,48 @@ class ChatRepository {
     return matches.isNotEmpty ? matches.first : null;
   }
 
+  /// Fetches presence (online status, last_seen) for the peer user of [channelId].
+  /// Returns the channel with updated isOnline and lastSeen, or null on failure.
+  Future<ChatChannel?> fetchPresenceForChannel(String channelId) async {
+    try {
+      final channel = getChannel(channelId);
+      if (channel == null ||
+          channel.peerUserId == null ||
+          channel.peerUserId!.isEmpty) {
+        return null;
+      }
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) return null;
+
+      final baseUser = UserSearchResult(
+        userId: channel.peerUserId!,
+        username: channel.name,
+        displayName: channel.name,
+        avatarUrl: channel.avatarUrl,
+      );
+      final withPresence = await _remoteDataSource.getUserPresence(
+        token: token,
+        userId: channel.peerUserId!,
+        baseUser: baseUser,
+      );
+      DateTime? lastSeen;
+      if (withPresence.lastSeen != null && withPresence.lastSeen! > 0) {
+        lastSeen = DateTime.fromMillisecondsSinceEpoch(
+          withPresence.lastSeen!,
+          isUtc: true,
+        ).toLocal();
+      }
+      return channel.copyWith(
+        isOnline: withPresence.presenceStatus == 'online',
+        lastSeen: lastSeen ?? channel.lastSeen,
+      );
+    } on ApiException {
+      return null;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<UserSearchResult>> searchUsers(String username) async {
     try {
       final token = _storageService.getToken();
