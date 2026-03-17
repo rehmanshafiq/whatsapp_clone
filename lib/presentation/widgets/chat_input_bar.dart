@@ -58,25 +58,12 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     _initVoiceDir();
   }
 
-  void _ensureTextFieldFocus() {
-    // When we switch from recorder → text mode on the first keystroke,
-    // the TextField subtree is rebuilt. This can momentarily drop focus
-    // and cause the keyboard to close. Re-request focus on the next frame
-    // so the keyboard stays open while the user continues typing.
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && !_textFocusNode.hasFocus) {
-        _textFocusNode.requestFocus();
-      }
-    });
-  }
-
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) {
+      // Update _hasText WITHOUT disturbing focus. The TextField widget stays
+      // in the tree at all times (stable layout), so the keyboard never closes.
       setState(() => _hasText = has);
-      if (has) {
-        _ensureTextFieldFocus();
-      }
     }
     if (has) {
       if (!_typingSent) {
@@ -214,12 +201,11 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Input bar
+          // Input bar — single stable layout, never swapped out
           Container(
             color: AppColors.scaffold,
-            padding:
-            const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: _hasText ? _buildTextMode() : _buildRecorderMode(),
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: _buildInputRow(),
           ),
 
           // Emoji picker panel
@@ -263,6 +249,91 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
             ),
         ],
       ),
+    );
+  }
+
+  /// Single stable layout.
+  ///
+  /// The TextField is ALWAYS in the tree (keyboard never closes).
+  /// When text is present the send button replaces the mic at the trailing end.
+  ///
+  /// The recorder is placed in a Stack that sits on top of the whole row so
+  /// that when the user holds the mic and the recorder widget expands to full
+  /// width it can do so freely — it is NOT constrained inside the Row next to
+  /// the TextField, which would cause a RenderFlex overflow.
+  Widget _buildInputRow() {
+    // Total right-side button width: 6 gap + 48 button = 54 px
+    const double trailingWidth = 54.0;
+
+    return Stack(
+      alignment: Alignment.centerRight,
+      children: [
+        // ── Bottom layer: text field with reserved space for trailing button ──
+        Row(
+          children: [
+            Expanded(child: _buildTextField()),
+            const SizedBox(width: trailingWidth),
+          ],
+        ),
+
+        // ── Top layer: send button OR recorder ────────────────────────────
+        // The recorder sits here so it can expand leftward over the text field
+        // during recording without fighting Row layout constraints.
+        if (_hasText)
+          Padding(
+            padding: const EdgeInsets.only(left: 6),
+            child: _CircleButton(icon: Icons.send, onPressed: _send),
+          )
+        else if (_voiceNoteDir != null)
+          SocialMediaRecorder(
+            sendRequestFunction: (File soundFile, String time) {
+              _handleAudioSend(soundFile, time);
+            },
+            storeSoundRecoringPath: _voiceNoteDir,
+            encode: AudioEncoderType.AAC,
+            initRecordPackageWidth: 48,
+            fullRecordPackageHeight: 48,
+            recordIcon: const _CircleButton(icon: Icons.mic),
+            recordIconWhenLockedRecord: const Icon(
+              Icons.send,
+              color: Colors.white,
+              size: 22,
+            ),
+            recordIconBackGroundColor: AppColors.accent,
+            recordIconWhenLockBackGroundColor: AppColors.accent,
+            backGroundColor: AppColors.inputBar,
+            counterBackGroundColor: AppColors.inputBar,
+            slideToCancelText: '  Slide to cancel  ◀',
+            slideToCancelTextStyle: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+            cancelTextStyle: const TextStyle(
+              color: Colors.red,
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+            counterTextStyle: const TextStyle(
+              color: Colors.red,
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+            ),
+            cancelTextBackGroundColor: AppColors.inputBar,
+            sendButtonIcon: const Icon(
+              Icons.send,
+              color: Colors.white,
+              size: 22,
+            ),
+            lockButton: const Icon(
+              Icons.lock,
+              color: AppColors.textSecondary,
+              size: 20,
+            ),
+            radius: BorderRadius.circular(24),
+          )
+        else
+          const _CircleButton(icon: Icons.mic),
+      ],
     );
   }
 
@@ -320,7 +391,6 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
         // Search bar
         searchViewConfig: SearchViewConfig(
           backgroundColor: AppColors.appBar,
-          // buttonColor: Colors.transparent,
           buttonIconColor: AppColors.textSecondary,
           hintText: 'Search emoji',
         ),
@@ -334,84 +404,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     );
   }
 
-  Widget _buildTextMode() {
-    return Row(
-      children: [
-        Expanded(child: _buildTextField()),
-        const SizedBox(width: 6),
-        _CircleButton(icon: Icons.send, onPressed: _send),
-      ],
-    );
-  }
-
-  /// The SocialMediaRecorder expands to full screen width when recording
-  /// starts. It MUST be the only child in its row — placing it beside the
-  /// text field causes overflow. Use a Stack so the recorder overlays the
-  /// text field during recording.
-  Widget _buildRecorderMode() {
-    return Stack(
-      alignment: Alignment.centerRight,
-      children: [
-        Row(
-          children: [
-            Expanded(child: _buildTextField(showCamera: true)),
-            const SizedBox(width: 54),
-          ],
-        ),
-        if (_voiceNoteDir != null)
-          SocialMediaRecorder(
-            sendRequestFunction: (File soundFile, String time) {
-              _handleAudioSend(soundFile, time);
-            },
-            storeSoundRecoringPath: _voiceNoteDir,
-            encode: AudioEncoderType.AAC,
-            initRecordPackageWidth: 48,
-            fullRecordPackageHeight: 48,
-            recordIcon: const _CircleButton(icon: Icons.mic),
-            recordIconWhenLockedRecord: const Icon(
-              Icons.send,
-              color: Colors.white,
-              size: 22,
-            ),
-            recordIconBackGroundColor: AppColors.accent,
-            recordIconWhenLockBackGroundColor: AppColors.accent,
-            backGroundColor: AppColors.inputBar,
-            counterBackGroundColor: AppColors.inputBar,
-            slideToCancelText: '  Slide to cancel  ◀',
-            slideToCancelTextStyle: const TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 14,
-            ),
-            cancelTextStyle: const TextStyle(
-              color: Colors.red,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
-            ),
-            counterTextStyle: const TextStyle(
-              color: Colors.red,
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-            ),
-            cancelTextBackGroundColor: AppColors.inputBar,
-            sendButtonIcon: const Icon(
-              Icons.send,
-              color: Colors.white,
-              size: 22,
-            ),
-            lockButton: const Icon(
-              Icons.lock,
-              color: AppColors.textSecondary,
-              size: 20,
-            ),
-            radius: BorderRadius.circular(24),
-          )
-        else
-          const _CircleButton(icon: Icons.mic),
-      ],
-    );
-  }
-
-  Widget _buildTextField({bool showCamera = false}) {
+  Widget _buildTextField() {
     return Container(
       decoration: BoxDecoration(
         color: AppColors.inputBar,
@@ -452,7 +445,8 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
             icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
             onPressed: () => showAttachmentSheet(context, widget.channelId),
           ),
-          if (showCamera)
+          // Camera icon only visible when no text has been entered
+          if (!_hasText)
             IconButton(
               icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
               onPressed: () {
