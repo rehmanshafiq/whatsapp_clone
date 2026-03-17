@@ -77,6 +77,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.dispose();
   }
 
+  String _capitalizeName(String name) {
+    if (name.isEmpty) return name;
+    return name[0].toUpperCase() + name.substring(1);
+  }
+
   // ------------------------------------------------------------------
   // Scroll handling
   // ------------------------------------------------------------------
@@ -280,7 +285,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 children: [
                   ChatAvatar(
                     imageUrl: channel?.avatarUrl,
-                    name: channel?.name ?? '',
+                    name: _capitalizeName(channel?.name ?? ''),
                     radius: 18,
                     heroTag: 'avatar_${widget.channelId}',
                   ),
@@ -290,7 +295,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          channel?.name ?? 'Chat',
+                          _capitalizeName(channel?.name ?? 'Chat'),
                           style: const TextStyle(
                             color: AppColors.textPrimary,
                             fontSize: 16,

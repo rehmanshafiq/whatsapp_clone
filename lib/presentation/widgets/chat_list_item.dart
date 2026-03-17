@@ -17,6 +17,11 @@ class ChatListItem extends StatelessWidget {
     required this.onTap,
   });
 
+  String _capitalizeName(String name) {
+    if (name.isEmpty) return name;
+    return name[0].toUpperCase() + name.substring(1);
+  }
+
   String _formatTime(DateTime time) {
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
@@ -61,7 +66,7 @@ class ChatListItem extends StatelessWidget {
           children: [
             ChatAvatar(
               imageUrl: channel.avatarUrl,
-              name: channel.name,
+              name: _capitalizeName(channel.name),
               heroTag: 'avatar_${channel.id}',
             ),
             const SizedBox(width: 12),
@@ -73,7 +78,7 @@ class ChatListItem extends StatelessWidget {
                     children: [
                       Expanded(
                         child: Text(
-                          channel.name,
+                          _capitalizeName(channel.name),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
