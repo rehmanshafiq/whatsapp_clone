@@ -119,7 +119,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.isLoading != curr.isLoading ||
           prev.isTyping != curr.isTyping ||
           prev.isOnline != curr.isOnline ||
-          prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen,
+          prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen ||
+          // ✅ ADD THIS: rebuild when presence changes in the channels list
+          prev.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline !=
+              curr.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline,
       // Also fire when loading finishes so the initial load scrolls correctly.
       listenWhen: (prev, curr) =>
           prev.messages.length != curr.messages.length ||
@@ -137,6 +140,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
+
+        final channelIsOnline = state.channels
+            .where((c) => c.id == widget.channelId)
+            .firstOrNull
+            ?.isOnline ?? false;
+        final isOnline = state.isOnline || channelIsOnline;
 
         // Only show messages for this conversation (handles socket updates).
         final messagesForThisChat = state.messages
@@ -183,7 +192,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           const Text('typing...',
                               style: TextStyle(
                                   color: AppColors.accent, fontSize: 12))
-                        else if (state.isOnline)
+                        else if (isOnline)
                           const Text('online',
                               style: TextStyle(
                                   color: AppColors.accent, fontSize: 12))
