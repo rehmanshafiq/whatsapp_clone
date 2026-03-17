@@ -25,10 +25,36 @@ class ChatDetailScreen extends StatefulWidget {
 }
 
 class _ChatDetailScreenState extends State<ChatDetailScreen> {
+  // ------------------------------------------------------------------
+  // Constants
+  // ------------------------------------------------------------------
+
+  /// How close to the visual top (oldest messages) the user must scroll
+  /// before we fire a pagination request.
+  static const double _paginationTriggerThreshold = 120.0;
+
+  /// "Scroll-to-bottom" FAB is hidden while the user is within this many
+  /// pixels of the visual bottom (latest messages).
+  static const double _atBottomThreshold = 80.0;
+
+  // ------------------------------------------------------------------
+  // State
+  // ------------------------------------------------------------------
+
   final _scrollController = ScrollController();
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
   bool _showScrollToBottom = false;
+
+  /// The maxScrollExtent captured **once** at the start of each pagination
+  /// request.  Nulled out after the post-frame delta jump is applied.
+  /// Using `??=` in the scroll listener ensures we never overwrite it while
+  /// a pagination fetch is already in flight.
+  double? _extentBeforePagination;
+
+  // ------------------------------------------------------------------
+  // Lifecycle
+  // ------------------------------------------------------------------
 
   @override
   void initState() {
@@ -51,31 +77,85 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     super.dispose();
   }
 
-  String _formatLastSeen(DateTime? lastSeen) {
-    if (lastSeen == null) return 'last seen recently';
-    final local = lastSeen.isUtc ? lastSeen.toLocal() : lastSeen;
-    final hour = local.hour;
-    final minute = local.minute;
-    final hour12 = hour == 0 ? 12 : (hour > 12 ? hour - 12 : hour);
-    final ampm = hour >= 12 ? 'PM' : 'AM';
-    final timeStr = '$hour12:${minute.toString().padLeft(2, '0')} $ampm';
-    return 'last seen $timeStr';
-  }
+  // ------------------------------------------------------------------
+  // Scroll handling
+  // ------------------------------------------------------------------
 
   void _handleScroll() {
     if (!_scrollController.hasClients) return;
-    final position = _scrollController.position;
+    final pos = _scrollController.position;
 
-    // With reverse: true, "bottom" (latest messages) is at pixels == 0.
-    // Show the FAB when the user has scrolled away from the bottom (pixels > 80).
-    final isAtBottom = position.pixels <= 80.0;
-
-    if (isAtBottom && _showScrollToBottom) {
+    // ── "Scroll to bottom" FAB visibility ────────────────────────────
+    // With reverse:true, pixels==0 is the visual bottom (latest messages).
+    final atBottom = pos.pixels <= _atBottomThreshold;
+    if (atBottom && _showScrollToBottom) {
       setState(() => _showScrollToBottom = false);
-    } else if (!isAtBottom && !_showScrollToBottom) {
+    } else if (!atBottom && !_showScrollToBottom) {
       setState(() => _showScrollToBottom = true);
     }
+
+    // ── Pagination trigger ────────────────────────────────────────────
+    // With reverse:true, pixels==maxScrollExtent is the visual top (oldest
+    // messages).  We request older messages when the user scrolls within
+    // _paginationTriggerThreshold pixels of that edge.
+    final distanceFromTop = pos.maxScrollExtent - pos.pixels;
+    if (distanceFromTop <= _paginationTriggerThreshold) {
+      // ??= guarantees we capture the extent only once per pagination cycle
+      // and never overwrite it while a fetch is still in flight.
+      _extentBeforePagination ??= pos.maxScrollExtent;
+      context.read<ChatCubit>().loadOlderMessages(widget.channelId);
+    }
   }
+
+  // ------------------------------------------------------------------
+  // Scroll helpers
+  // ------------------------------------------------------------------
+
+  /// Scrolls to the visual bottom (latest messages).
+  /// Because the ListView uses reverse:true, "bottom" is always at pixels==0.
+  void _scrollToBottom({bool animate = true}) {
+    if (!_scrollController.hasClients) return;
+    if (animate) {
+      _scrollController.animateTo(
+        0,
+        duration: const Duration(milliseconds: 200),
+        curve: Curves.easeOut,
+      );
+    } else {
+      _scrollController.jumpTo(0);
+    }
+  }
+
+  /// Called after older messages finish loading.
+  ///
+  /// The delta between the old and new maxScrollExtent equals the height of
+  /// the prepended items.  We jump by that delta so the previously-visible
+  /// messages stay in place — identical to WhatsApp behaviour.
+  ///
+  /// **Critical:** the delta must be read inside addPostFrameCallback so that
+  /// Flutter has already laid out the new items and maxScrollExtent reflects
+  /// the added content.  Reading it in the BlocListener (before layout) would
+  /// always yield delta==0.
+  void _restoreScrollPositionAfterPagination() {
+    final saved = _extentBeforePagination;
+    if (saved == null) return;
+    _extentBeforePagination = null; // reset for the next pagination cycle
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_scrollController.hasClients) return;
+      final pos = _scrollController.position;
+      final delta = pos.maxScrollExtent - saved;
+      if (delta > 0) {
+        // jumpTo keeps the scroll instant — no animation so the user doesn't
+        // notice the viewport shift.
+        _scrollController.jumpTo(pos.pixels + delta);
+      }
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Reactions
+  // ------------------------------------------------------------------
 
   void _syncReactions(List<Message> messages) {
     if (_reactionsSynced) return;
@@ -90,53 +170,69 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  /// Scrolls to the bottom of the list (i.e. the latest messages).
-  ///
-  /// Because the ListView uses [reverse: true], the "bottom" is always at
-  /// pixels == 0, so this is instant and perfectly accurate — no double-frame
-  /// tricks needed.
-  void _scrollToBottom({bool animate = true}) {
-    if (!_scrollController.hasClients) return;
-    if (animate) {
-      _scrollController.animateTo(
-        0,
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOut,
-      );
-    } else {
-      _scrollController.jumpTo(0);
-    }
+  // ------------------------------------------------------------------
+  // Formatting helpers
+  // ------------------------------------------------------------------
+
+  String _formatLastSeen(DateTime? lastSeen) {
+    if (lastSeen == null) return 'last seen recently';
+    final local = lastSeen.isUtc ? lastSeen.toLocal() : lastSeen;
+    final hour12 = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
+    final ampm = local.hour >= 12 ? 'PM' : 'AM';
+    final timeStr = '$hour12:${local.minute.toString().padLeft(2, '0')} $ampm';
+    return 'last seen $timeStr';
   }
+
+  // ------------------------------------------------------------------
+  // Build
+  // ------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     return BlocConsumer<ChatCubit, ChatState>(
-      // Rebuild when messages change (e.g. new socket message), loading state,
-      // or presence/typing status (so "online" and "typing..." update in real time).
+      // ── Rebuild condition ─────────────────────────────────────────
       buildWhen: (prev, curr) =>
-          prev.messages != curr.messages ||
+      prev.messages != curr.messages ||
           prev.selectedChannel != curr.selectedChannel ||
           prev.isLoading != curr.isLoading ||
+          prev.isPaginationLoading != curr.isPaginationLoading ||
           prev.isTyping != curr.isTyping ||
           prev.isOnline != curr.isOnline ||
           prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen ||
-          // ✅ ADD THIS: rebuild when presence changes in the channels list
           prev.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline !=
               curr.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline,
-      // Also fire when loading finishes so the initial load scrolls correctly.
+
+      // ── Side-effect condition ─────────────────────────────────────
       listenWhen: (prev, curr) =>
-          prev.messages.length != curr.messages.length ||
-          (prev.isLoading && !curr.isLoading && curr.messages.isNotEmpty),
+      // New messages arrived (new socket message or initial load).
+      prev.messages.length != curr.messages.length ||
+          // Initial load finished.
+          (prev.isLoading && !curr.isLoading && curr.messages.isNotEmpty) ||
+          // Pagination finished — need to restore scroll position.
+          (prev.isPaginationLoading && !curr.isPaginationLoading),
+
       listener: (_, state) {
         final forThisChat = state.messages
             .where((m) => m.channelId == widget.channelId)
             .toList();
+
         _syncReactions(forThisChat);
-        // Only auto-scroll when user is already at bottom (so new messages appear in view).
+
+        // ── Auto-scroll to bottom for new incoming/outgoing messages ──
+        // Only when the user is already at the bottom; otherwise leave them
+        // where they are (they may be reading older messages).
         final atBottom = _scrollController.hasClients &&
-            _scrollController.position.pixels <= 80.0;
-        if (atBottom) _scrollToBottom(animate: forThisChat.length > 1);
+            _scrollController.position.pixels <= _atBottomThreshold;
+        if (atBottom) {
+          _scrollToBottom(animate: forThisChat.length > 1);
+        }
+
+        // ── Restore scroll position after pagination ──────────────────
+        // This is intentionally checked independently of `atBottom` —
+        // the user is near the top when pagination fires, never at bottom.
+        _restoreScrollPositionAfterPagination();
       },
+
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
@@ -144,14 +240,27 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final channelIsOnline = state.channels
             .where((c) => c.id == widget.channelId)
             .firstOrNull
-            ?.isOnline ?? false;
+            ?.isOnline ??
+            false;
         final isOnline = state.isOnline || channelIsOnline;
 
         // Only show messages for this conversation (handles socket updates).
         final messagesForThisChat = state.messages
             .where((m) => m.channelId == widget.channelId)
             .toList();
+
+        // reversed so index 0 == latest message (sits at visual bottom
+        // because ListView has reverse:true).
         final reversedMessages = messagesForThisChat.reversed.toList();
+
+        // Total item count:
+        //   • optional typing indicator at index 0 (visual bottom)
+        //   • messages
+        //   • optional pagination loader at the last index (visual top)
+        final typingOffset = state.isTyping ? 1 : 0;
+        final itemCount = reversedMessages.length +
+            typingOffset +
+            (state.isPaginationLoading ? 1 : 0);
 
         return PopScope(
           onPopInvokedWithResult: (didPop, _) {
@@ -189,13 +298,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ),
                         ),
                         if (state.isTyping)
-                          const Text('typing...',
-                              style: TextStyle(
-                                  color: AppColors.accent, fontSize: 12))
+                          const Text(
+                            'typing...',
+                            style: TextStyle(
+                                color: AppColors.accent, fontSize: 12),
+                          )
                         else if (isOnline)
-                          const Text('online',
-                              style: TextStyle(
-                                  color: AppColors.accent, fontSize: 12))
+                          const Text(
+                            'online',
+                            style: TextStyle(
+                                color: AppColors.accent, fontSize: 12),
+                          )
                         else
                           Text(
                             _formatLastSeen(channel?.lastSeen),
@@ -212,35 +325,59 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             ),
             body: Stack(
               children: [
+                // ── Decorative dot-grid background ────────────────────
                 CustomPaint(
                   painter: _ChatBackgroundPainter(),
                   size: Size.infinite,
                 ),
+
+                // ── Main column: message list + input bar ─────────────
                 Column(
                   children: [
                     Expanded(
                       child: state.isLoading && messagesForThisChat.isEmpty
-                              ? const Center(
-                              child: CircularProgressIndicator(
-                                  color: AppColors.accent))
+                          ? const Center(
+                        child: CircularProgressIndicator(
+                            color: AppColors.accent),
+                      )
                           : ListView.builder(
                         controller: _scrollController,
-                        // reverse: true means index 0 is at the BOTTOM.
-                        // Latest messages (index 0 after reversing the
-                        // list) are always visible without any scrolling.
+
+                        // reverse:true keeps the latest messages at the
+                        // visual bottom without any manual scrolling.
                         reverse: true,
+
                         padding:
                         const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: reversedMessages.length +
-                            (state.isTyping ? 1 : 0),
+                        itemCount: itemCount,
                         itemBuilder: (context, index) {
-                          // Typing indicator sits at the very bottom
-                          // (index 0 in reversed space).
+                          // ── Typing indicator (index 0, visual bottom) ──
                           if (index == 0 && state.isTyping) {
                             return const TypingIndicator();
                           }
-                          final messageIndex =
-                          state.isTyping ? index - 1 : index;
+
+                          // ── Pagination loader (last index, visual top) ──
+                          final loaderIndex =
+                              typingOffset + reversedMessages.length;
+                          if (state.isPaginationLoading &&
+                              index == loaderIndex) {
+                            return const Padding(
+                              padding: EdgeInsets.symmetric(vertical: 16),
+                              child: Center(
+                                child: SizedBox(
+                                  width: 24,
+                                  height: 24,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: AppColors.accent,
+                                  ),
+                                ),
+                              ),
+                            );
+                          }
+
+                          // ── Message bubble ────────────────────────────
+                          final messageIndex = index - typingOffset;
                           return MessageBubble(
                             message: reversedMessages[messageIndex],
                             reactionsController: _reactionsController,
@@ -249,6 +386,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                         },
                       ),
                     ),
+
+                    // ── Input bar ─────────────────────────────────────
                     ChatInputBar(
                       channelId: widget.channelId,
                       onSend: (text) =>
@@ -272,6 +411,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     ),
                   ],
                 ),
+
+                // ── Scroll-to-bottom FAB ──────────────────────────────
                 if (_showScrollToBottom)
                   Positioned(
                     right: 16,

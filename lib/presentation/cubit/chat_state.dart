@@ -12,6 +12,8 @@ class ChatState extends Equatable {
   final bool isOnline;
   final bool isSending;
   final bool isLoading;
+  final bool isPaginationLoading;
+  final bool hasMoreMessages;
   final String? error;
   final String searchQuery;
   final List<UserSearchResult> userSearchResults;
@@ -29,6 +31,8 @@ class ChatState extends Equatable {
     this.isOnline = false,
     this.isSending = false,
     this.isLoading = false,
+    this.isPaginationLoading = false,
+    this.hasMoreMessages = true,
     this.error,
     this.searchQuery = '',
     this.userSearchResults = const [],
@@ -45,6 +49,8 @@ class ChatState extends Equatable {
     bool? isOnline,
     bool? isSending,
     bool? isLoading,
+    bool? isPaginationLoading,
+    bool? hasMoreMessages,
     String? error,
     String? searchQuery,
     bool clearSelectedChannel = false,
@@ -65,6 +71,8 @@ class ChatState extends Equatable {
       isOnline: isOnline ?? this.isOnline,
       isSending: isSending ?? this.isSending,
       isLoading: isLoading ?? this.isLoading,
+      isPaginationLoading: isPaginationLoading ?? this.isPaginationLoading,
+      hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       error: clearError ? null : (error ?? this.error),
       searchQuery: searchQuery ?? this.searchQuery,
       userSearchResults: userSearchResults ?? this.userSearchResults,
@@ -97,6 +105,8 @@ class ChatState extends Equatable {
     isOnline,
     isSending,
     isLoading,
+    isPaginationLoading,
+    hasMoreMessages,
     error,
     searchQuery,
     userSearchResults,

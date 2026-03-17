@@ -9,6 +9,21 @@ import '../models/message_status.dart';
 import '../models/user.dart';
 import '../models/user_search.dart';
 
+/// Paginated response for messages API. Supports cursor, before, or page-based pagination.
+class MessagesPage {
+  final List<Message> messages;
+  final String? nextCursor;
+  final bool hasMore;
+
+  const MessagesPage({
+    required this.messages,
+    this.nextCursor,
+    this.hasMore = false,
+  });
+
+  static const MessagesPage empty = MessagesPage(messages: [], hasMore: false);
+}
+
 class ChatRemoteDataSource {
   ChatRemoteDataSource(this._dio);
 
@@ -296,13 +311,30 @@ class ChatRemoteDataSource {
     }
   }
 
-  Future<List<Message>> fetchMessages(
+  /// Paginated messages response: list plus next cursor / hasMore for older messages.
+  static const int defaultMessagesLimit = 50;
+
+  Future<MessagesPage> fetchMessages(
     String channelId, {
     required String token,
+    int limit = defaultMessagesLimit,
+    String? before,
+    String? cursor,
+    int? page,
   }) async {
     try {
+      final queryParams = <String, dynamic>{'limit': limit};
+      if (before != null && before.isNotEmpty) {
+        queryParams['before'] = before;
+      } else if (cursor != null && cursor.isNotEmpty) {
+        queryParams['cursor'] = cursor;
+      } else if (page != null && page > 1) {
+        queryParams['page'] = page;
+      }
+
       final response = await _dio.get<dynamic>(
         '/api/v1/chat/conversations/$channelId/messages',
+        queryParameters: queryParams,
         options: Options(
           headers: <String, String>{
             'authorization': 'Bearer $token',
@@ -312,9 +344,15 @@ class ChatRemoteDataSource {
       );
       final data = response.data;
       final list = _extractMessageList(data);
-      return list.map(_mapMessageFromApi).toList();
+      final messages = list.map(_mapMessageFromApi).toList();
+      final pageInfo = _extractPageInfo(data, list);
+      return MessagesPage(
+        messages: messages,
+        nextCursor: pageInfo.nextCursor,
+        hasMore: pageInfo.hasMore,
+      );
     } on DioException catch (e) {
-      if (e.response?.statusCode == 404) return [];
+      if (e.response?.statusCode == 404) return MessagesPage.empty;
       final statusCode = e.response?.statusCode;
       String message = 'Failed to fetch messages';
       if (statusCode == 401) {
@@ -341,6 +379,32 @@ class ChatRemoteDataSource {
       }
     }
     return [];
+  }
+
+  ({String? nextCursor, bool hasMore}) _extractPageInfo(
+    dynamic data,
+    List<Map<String, dynamic>> messageList,
+  ) {
+    String? nextCursor;
+    bool hasMore = false;
+
+    if (data is Map<String, dynamic>) {
+      nextCursor = _asString(
+        data['next_cursor'] ?? data['cursor'] ?? data['next_cursor_token'],
+      );
+      final hasMoreVal = data['has_more'] ?? data['hasMore'] ?? data['has_next'];
+      if (hasMoreVal is bool) {
+        hasMore = hasMoreVal;
+      } else if (hasMoreVal != null) {
+        hasMore = hasMoreVal == true || hasMoreVal == 1;
+      }
+      // Infer hasMore from nextCursor or from list size vs limit
+      if (nextCursor != null && nextCursor.isNotEmpty) {
+        hasMore = true;
+      }
+    }
+
+    return (nextCursor: nextCursor, hasMore: hasMore);
   }
 
   Message _mapMessageFromApi(Map<String, dynamic> json) {

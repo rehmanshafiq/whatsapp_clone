@@ -134,8 +134,8 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(isLoading: true, clearError: true));
     try {
       final channel = _repository.getChannel(channelId);
-      final raw = await _repository.getMessages(channelId);
-      final messages = _repository.normalizeMessageSenderIds(raw);
+      final page = await _repository.getMessages(channelId);
+      final messages = page.messages; // Already normalized by repository
       messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
 
       if (channel != null) {
@@ -199,14 +199,68 @@ class ChatCubit extends Cubit<ChatState> {
             selectedChannel: effectiveChannel,
             isOnline: effectiveIsOnline,
             isLoading: false,
+            hasMoreMessages: page.hasMore,
             channels: updatedChats,
           ),
         );
       } else {
-        emit(state.copyWith(messages: messages, isLoading: false));
+        emit(state.copyWith(
+          messages: messages,
+          isLoading: false,
+          hasMoreMessages: page.hasMore,
+        ));
       }
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isLoading: false));
+    }
+  }
+
+  /// Loads older messages when user scrolls to top. Appends to the beginning
+  /// of the list and preserves scroll position. Prevents duplicate calls.
+  Future<void> loadOlderMessages(String channelId) async {
+    if (state.isPaginationLoading || !state.hasMoreMessages) return;
+    final messagesForChannel =
+        state.messages.where((m) => m.channelId == channelId).toList();
+    if (messagesForChannel.isEmpty) return;
+
+    emit(state.copyWith(isPaginationLoading: true));
+    try {
+      messagesForChannel.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      final oldestMessageId = messagesForChannel.first.id;
+
+      final page = await _repository.loadOlderMessages(
+        channelId,
+        beforeMessageId: oldestMessageId,
+      );
+
+      if (page.messages.isEmpty) {
+        if (!isClosed) {
+          emit(state.copyWith(isPaginationLoading: false, hasMoreMessages: false));
+        }
+        return;
+      }
+
+      if (!isClosed && state.selectedChannel?.id == channelId) {
+        final normalized = _repository.normalizeMessageSenderIds(page.messages);
+        final merged = [...normalized, ...state.messages];
+        final uniqueById = <String, Message>{};
+        for (final m in merged) {
+          uniqueById[m.id] = m;
+        }
+        final deduped = uniqueById.values.toList();
+        deduped.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        emit(state.copyWith(
+          messages: deduped,
+          isPaginationLoading: false,
+          hasMoreMessages: page.hasMore,
+        ));
+      } else {
+        emit(state.copyWith(isPaginationLoading: false, hasMoreMessages: page.hasMore));
+      }
+    } catch (e) {
+      if (!isClosed) {
+        emit(state.copyWith(isPaginationLoading: false));
+      }
     }
   }
 

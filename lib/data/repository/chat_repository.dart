@@ -77,7 +77,11 @@ class ChatRepository {
     }
   }
 
-  Future<List<Message>> getMessages(String channelId) async {
+  /// Fetches the latest [limit] messages for [channelId]. Used for initial chat load.
+  Future<MessagesPage> getMessages(
+    String channelId, {
+    int limit = ChatRemoteDataSource.defaultMessagesLimit,
+  }) async {
     try {
       final token = _storageService.getToken();
       if (token == null || token.isEmpty) {
@@ -86,14 +90,66 @@ class ChatRepository {
           statusCode: 401,
         );
       }
-      final remoteMessages =
-          await _remoteDataSource.fetchMessages(channelId, token: token);
-      final normalized = _normalizeMessageSenderIds(remoteMessages);
+      final page =
+          await _remoteDataSource.fetchMessages(channelId, token: token, limit: limit);
+      final normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
-      return normalized;
+      return MessagesPage(
+        messages: normalized,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Fetches older messages for pagination. Use [beforeMessageId] of the
+  /// oldest message currently in the list, or [cursor] if the backend returns it.
+  Future<MessagesPage> loadOlderMessages(
+    String channelId, {
+    required String? beforeMessageId,
+    String? cursor,
+    int limit = ChatRemoteDataSource.defaultMessagesLimit,
+  }) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final page = await _remoteDataSource.fetchMessages(
+        channelId,
+        token: token,
+        limit: limit,
+        before: beforeMessageId,
+        cursor: cursor,
+      );
+      final normalized = _normalizeMessageSenderIds(page.messages);
+      // Merge into storage: older messages go to the front of the channel's list
+      final allMessages = _storageService.getMessages();
+      final existing = allMessages.where((m) => m.channelId == channelId).toList();
+      final existingIds = existing.map((m) => m.id).toSet();
+      final newOlder = normalized
+          .where((m) => !existingIds.contains(m.id))
+          .toList();
+      allMessages.removeWhere((m) => m.channelId == channelId);
+      existing.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      newOlder.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+      allMessages.addAll([...newOlder, ...existing]);
+      _storageService.saveMessages(allMessages);
+      return MessagesPage(
+        messages: normalized,
+        nextCursor: page.nextCursor,
+        hasMore: page.hasMore,
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -130,9 +186,12 @@ class ChatRepository {
         return _normalizeMessageSenderIds(fromStorage);
       }
 
-      final remoteMessages =
-          await _remoteDataSource.fetchMessages(channelId, token: token);
-      final normalized = _normalizeMessageSenderIds(remoteMessages);
+      final page = await _remoteDataSource.fetchMessages(
+        channelId,
+        token: token,
+        limit: ChatRemoteDataSource.defaultMessagesLimit,
+      );
+      final normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
