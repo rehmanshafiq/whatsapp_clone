@@ -338,143 +338,145 @@ class _ChatListScreenState extends State<ChatListScreen> {
               ...AppConstants.placeholderAvatars,
             ].toSet().toList();
 
-            return Padding(
-              padding: EdgeInsets.only(
-                left: 16,
-                right: 16,
-                bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-                top: 16,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      const Text(
-                        'Edit Profile',
-                        style: TextStyle(
-                          color: AppColors.textPrimary,
-                          fontSize: 18,
-                          fontWeight: FontWeight.w600,
+            return SingleChildScrollView(
+              child: Padding(
+                padding: EdgeInsets.only(
+                  left: 16,
+                  right: 16,
+                  bottom: MediaQuery.of(context).viewInsets.bottom + 16,
+                  top: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Edit Profile',
+                          style: TextStyle(
+                            color: AppColors.textPrimary,
+                            fontSize: 18,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
-                      ),
-                      IconButton(
-                        icon: const Icon(
-                          Icons.close,
-                          color: AppColors.iconMuted,
+                        IconButton(
+                          icon: const Icon(
+                            Icons.close,
+                            color: AppColors.iconMuted,
+                          ),
+                          onPressed: () => Navigator.of(bottomSheetContext).pop(),
                         ),
-                        onPressed: () => Navigator.of(bottomSheetContext).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: ChatAvatar(
-                      imageUrl: selectedAvatarUrl,
-                      name: profile.displayName,
-                      radius: 32,
+                      ],
                     ),
-                  ),
-                  const SizedBox(height: 16),
-                  SizedBox(
-                    height: 72,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: avatarOptions.length + 1,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        if (index == avatarOptions.length) {
+                    const SizedBox(height: 16),
+                    Center(
+                      child: ChatAvatar(
+                        imageUrl: selectedAvatarUrl,
+                        name: profile.displayName,
+                        radius: 32,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      height: 72,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: avatarOptions.length + 1,
+                        separatorBuilder: (_, __) => const SizedBox(width: 12),
+                        itemBuilder: (context, index) {
+                          if (index == avatarOptions.length) {
+                            return GestureDetector(
+                              onTap: () {
+                                ScaffoldMessenger.of(rootContext).showSnackBar(
+                                  const SnackBar(
+                                    content:
+                                        Text('Avatar upload not implemented'),
+                                  ),
+                                );
+                              },
+                              child: CircleAvatar(
+                                radius: 24,
+                                backgroundColor: AppColors.chatBackground,
+                                child: const Icon(
+                                  Icons.upload,
+                                  color: AppColors.iconMuted,
+                                ),
+                              ),
+                            );
+                          }
+                          final option = avatarOptions[index];
+                          final isSelected = option == selectedAvatarUrl;
                           return GestureDetector(
                             onTap: () {
-                              ScaffoldMessenger.of(rootContext).showSnackBar(
-                                const SnackBar(
-                                  content:
-                                      Text('Avatar upload not implemented'),
-                                ),
-                              );
+                              setState(() {
+                                selectedAvatarUrl = option;
+                              });
                             },
-                            child: CircleAvatar(
-                              radius: 24,
-                              backgroundColor: AppColors.chatBackground,
-                              child: const Icon(
-                                Icons.upload,
-                                color: AppColors.iconMuted,
+                            child: Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppColors.accent
+                                      : Colors.transparent,
+                                  width: 2,
+                                ),
+                              ),
+                              padding: const EdgeInsets.all(2),
+                              child: ChatAvatar(
+                                imageUrl: option,
+                                name: profile.displayName,
+                                radius: 24,
                               ),
                             ),
                           );
-                        }
-                        final option = avatarOptions[index];
-                        final isSelected = option == selectedAvatarUrl;
-                        return GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              selectedAvatarUrl = option;
-                            });
-                          },
-                          child: Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isSelected
-                                    ? AppColors.accent
-                                    : Colors.transparent,
-                                width: 2,
-                              ),
-                            ),
-                            padding: const EdgeInsets.all(2),
-                            child: ChatAvatar(
-                              imageUrl: option,
-                              name: profile.displayName,
-                              radius: 24,
-                            ),
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    _buildProfileTextField(
+                      label: 'Display Name',
+                      controller: displayNameController,
+                      enabled: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildProfileTextField(
+                      label: 'Status',
+                      controller: statusController,
+                      enabled: true,
+                    ),
+                    const SizedBox(height: 12),
+                    _buildProfileTextField(
+                      label: 'Username (cannot be changed)',
+                      controller:
+                          TextEditingController(text: profile.username),
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.accent,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
-                        );
-                      },
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  _buildProfileTextField(
-                    label: 'Display Name',
-                    controller: displayNameController,
-                    enabled: true,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildProfileTextField(
-                    label: 'Status',
-                    controller: statusController,
-                    enabled: true,
-                  ),
-                  const SizedBox(height: 12),
-                  _buildProfileTextField(
-                    label: 'Username (cannot be changed)',
-                    controller:
-                        TextEditingController(text: profile.username),
-                    enabled: false,
-                  ),
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.accent,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
+                          padding: const EdgeInsets.symmetric(vertical: 14),
                         ),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
-                      onPressed: handleSave,
-                      child: const Text(
-                        'Save Changes',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.w600,
+                        onPressed: handleSave,
+                        child: const Text(
+                          'Save Changes',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                ],
+                  ],
+                ),
               ),
             );
           },
