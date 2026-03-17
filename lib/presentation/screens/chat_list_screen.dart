@@ -71,24 +71,12 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (!_isSearching) {
         _searchController.clear();
         cubit.updateSearchQuery('');
-        _searchDebounce?.cancel();
       }
     });
   }
 
   void _onSearchChanged(ChatCubit cubit, String value) {
     cubit.updateSearchQuery(value);
-
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 450), () {
-      if (!mounted) return;
-      final query = _searchController.text.trim();
-      if (query.isEmpty) {
-        cubit.searchUsers('');
-      } else {
-        cubit.searchUsers(query);
-      }
-    });
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -205,13 +193,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
           if (previous.isLoading != current.isLoading) return true;
           if (previous.error != current.error) return true;
           if (previous.searchQuery != current.searchQuery) return true;
-          if (previous.userSearchResults != current.userSearchResults) {
-            return true;
-          }
-          if (previous.isUserSearchLoading != current.isUserSearchLoading) {
-            return true;
-          }
-          if (previous.userSearchError != current.userSearchError) return true;
           // Equatable equality on lists inside ChatState will trigger build
           if (previous.channels != current.channels) return true;
           return false;
@@ -236,124 +217,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                 ],
               ),
-            );
-          }
-
-          if (_isSearching && _searchController.text.trim().isNotEmpty) {
-            final searchResults = state.userSearchResults;
-
-            if (state.isUserSearchLoading) {
-              return const Center(
-                child: CircularProgressIndicator(color: AppColors.accent),
-              );
-            }
-
-            if (state.userSearchError != null) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    const Icon(
-                      Icons.error_outline,
-                      color: Colors.red,
-                      size: 48,
-                    ),
-                    const SizedBox(height: 12),
-                    Text(
-                      state.userSearchError!,
-                      style: const TextStyle(color: Colors.red),
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            if (searchResults.isEmpty) {
-              return Center(
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.person_search_outlined,
-                      color: AppColors.textSecondary.withValues(alpha: 0.4),
-                      size: 64,
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'No users found',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 16,
-                      ),
-                    ),
-                  ],
-                ),
-              );
-            }
-
-            return ListView.separated(
-              itemCount: searchResults.length,
-              separatorBuilder: (context, index) => const Divider(
-                color: AppColors.divider,
-                height: 1,
-                indent: 76,
-              ),
-              itemBuilder: (context, index) {
-                final user = searchResults[index];
-                final presence = _buildPresenceSubtitle(
-                  status: user.presenceStatus,
-                  lastSeen: user.lastSeen,
-                );
-                return ListTile(
-                  leading: ChatAvatar(
-                    imageUrl: user.avatarUrl,
-                    name: user.displayName,
-                    radius: 24,
-                  ),
-                  title: Text(
-                    user.displayName,
-                    style: const TextStyle(
-                      color: AppColors.textPrimary,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  subtitle: Text(
-                    presence ??
-                        (user.statusText?.isNotEmpty == true
-                            ? user.statusText!
-                            : ''),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 13,
-                    ),
-                  ),
-                  onTap: () async {
-                    final chatCubit = context.read<ChatCubit>();
-                    try {
-                      final channel = await chatCubit.repository
-                          .createOrGetConversationForUser(user);
-                      if (!context.mounted) return;
-                      context.goNamed(
-                        AppRouter.chatDetail,
-                        pathParameters: {'id': channel.id},
-                      );
-                    } catch (e) {
-                      if (!context.mounted) return;
-                      ScaffoldMessenger.of(context)
-                        ..hideCurrentSnackBar()
-                        ..showSnackBar(
-                          SnackBar(
-                            content: Text(e.toString()),
-                            backgroundColor: Colors.redAccent,
-                          ),
-                        );
-                    }
-                  },
-                );
-              },
             );
           }
 
@@ -411,11 +274,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
           );
         },
       ),
-      // floatingActionButton: FloatingActionButton(
-      //   backgroundColor: AppColors.accent,
-      //   onPressed: () => context.goNamed(AppRouter.contacts),
-      //   child: const Icon(Icons.chat, color: Colors.white),
-      // ),
+      floatingActionButton: FloatingActionButton(
+        backgroundColor: AppColors.accent,
+        onPressed: () => context.goNamed(AppRouter.contacts),
+        child: const Icon(Icons.chat, color: Colors.white),
+      ),
     );
   }
 
