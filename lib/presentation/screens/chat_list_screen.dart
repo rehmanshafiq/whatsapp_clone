@@ -25,6 +25,7 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   bool _isSearching = false;
+  String _localSearchQuery = '';
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
 
@@ -70,13 +71,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _isSearching = !_isSearching;
       if (!_isSearching) {
         _searchController.clear();
-        cubit.updateSearchQuery('');
+        _localSearchQuery = '';
       }
     });
   }
 
   void _onSearchChanged(ChatCubit cubit, String value) {
-    cubit.updateSearchQuery(value);
+    setState(() {
+      _localSearchQuery = value;
+    });
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -192,7 +195,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
         buildWhen: (previous, current) {
           if (previous.isLoading != current.isLoading) return true;
           if (previous.error != current.error) return true;
-          if (previous.searchQuery != current.searchQuery) return true;
           // Equatable equality on lists inside ChatState will trigger build
           if (previous.channels != current.channels) return true;
           return false;
@@ -220,7 +222,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
             );
           }
 
-          final channels = state.filteredChannels;
+          // Filter channels locally instead of using the shared cubit searchQuery
+          final channels = _localSearchQuery.isEmpty
+              ? state.channels
+              : state.channels.where((c) {
+                  final query = _localSearchQuery.toLowerCase();
+                  return c.name.toLowerCase().contains(query) ||
+                      c.lastMessage.toLowerCase().contains(query);
+                }).toList();
 
           if (channels.isEmpty) {
             return Center(
@@ -234,7 +243,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    state.searchQuery.isNotEmpty
+                    _localSearchQuery.isNotEmpty
                         ? 'No chats found'
                         : 'No conversations yet',
                     style: const TextStyle(
