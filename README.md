@@ -150,43 +150,43 @@ Remote Data Source (REST + WebSocket)
 
 ### Sign Up
 
-<img src="assets/screenshots/signup.png" width="300" />
+<img src="assets/screenshots/signup.png" width="280" height="500" />
 
 ### Login
 
-<img src="assets/screenshots/login.png" width="300" />
+<img src="assets/screenshots/login.png" width="280" />
 
 ### Chat List
 
-<img src="assets/screenshots/chat_list.png" width="300" />
+<img src="assets/screenshots/chat_list.png" width="280" />
 
 ### Chat Screen
 
-<img src="assets/screenshots/chat_screen.png" width="300" />
+<img src="assets/screenshots/chat_screen.png" width="280" />
 
 ### Profile Screen
 
-<img src="assets/screenshots/profile.png" width="300" />
+<img src="assets/screenshots/profile.png" width="280" />
 
 ### Camera Screen
 
-<img src="assets/screenshots/camera.png" width="300" />
+<img src="assets/screenshots/camera.png" width="280" />
 
 ### Gallery Screen
 
-<img src="assets/screenshots/gallery.png" width="300" />
+<img src="assets/screenshots/gallery.png" width="280" />
 
 ### Attachments Screen
 
-<img src="assets/screenshots/attachments.png" width="300" />
+<img src="assets/screenshots/attachments.png" width="280" />
 
 ### Contact Screen Empty
 
-<img src="assets/screenshots/search_empty.png" width="300" />
+<img src="assets/screenshots/search_empty.png" width="280" />
 
 ### Contact Screen
 
-<img src="assets/screenshots/search_contact.png" width="300" />
+<img src="assets/screenshots/search_contact.png" width="280" />
 
 ---
 
