@@ -150,7 +150,7 @@ Remote Data Source (REST + WebSocket)
 
 ### Sign Up
 
-<img src="assets/screenshots/signup.png" width="280" height="500" />
+<img src="assets/screenshots/signup.png" width="280" />
 
 ### Login
 
