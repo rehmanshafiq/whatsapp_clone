@@ -283,6 +283,59 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Clears all messages for [conversationId] via API, updates local state.
+  Future<void> clearChat(String conversationId) async {
+    try {
+      await _repository.clearChatMessages(conversationId);
+      if (isClosed) return;
+      final channels = state.channels
+          .map((c) => c.id == conversationId ? c.copyWith(lastMessage: '') : c)
+          .toList();
+      // If this conversation is currently open, clear messages too.
+      final isOpen = state.selectedChannel?.id == conversationId;
+      emit(state.copyWith(
+        channels: channels,
+        messages: isOpen ? const <Message>[] : null,
+      ));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Deletes a conversation via API and removes it from local state.
+  Future<void> deleteConversation(String conversationId) async {
+    try {
+      await _repository.deleteConversationRemote(conversationId);
+      if (isClosed) return;
+      final channels =
+          state.channels.where((c) => c.id != conversationId).toList();
+      emit(state.copyWith(channels: channels));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Toggles mute on a conversation via API and updates local state.
+  Future<void> toggleMute(String conversationId) async {
+    try {
+      final isMuted = await _repository.toggleMuteConversation(conversationId);
+      if (isClosed) return;
+      final channels = state.channels
+          .map(
+              (c) => c.id == conversationId ? c.copyWith(isMuted: isMuted) : c)
+          .toList();
+      emit(state.copyWith(channels: channels));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Future<void> sendMessage(String channelId, String text) async {
     if (text.trim().isEmpty) return;
 

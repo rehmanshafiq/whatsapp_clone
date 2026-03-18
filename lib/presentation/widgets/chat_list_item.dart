@@ -10,11 +10,13 @@ import 'unread_badge.dart';
 class ChatListItem extends StatelessWidget {
   final ChatChannel channel;
   final VoidCallback onTap;
+  final VoidCallback? onLongPress;
 
   const ChatListItem({
     super.key,
     required this.channel,
     required this.onTap,
+    this.onLongPress,
   });
 
   String _capitalizeName(String name) {
@@ -58,8 +60,10 @@ class ChatListItem extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final showUnreadBadge = channel.unreadCount > 0 && !channel.isMuted;
     return InkWell(
       onTap: onTap,
+      onLongPress: onLongPress,
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
@@ -125,8 +129,17 @@ class ChatListItem extends StatelessWidget {
                           ),
                         ),
                       ),
-                      if (channel.unreadCount > 0)
+                      if (showUnreadBadge)
                         UnreadBadge(count: channel.unreadCount),
+                      if (channel.isMuted)
+                        Padding(
+                          padding: EdgeInsets.only(left: showUnreadBadge ? 6 : 0),
+                          child: const Icon(
+                            Icons.volume_off,
+                            size: 16,
+                            color: AppColors.textSecondary,
+                          ),
+                        ),
                     ],
                   ),
                 ],

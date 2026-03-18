@@ -508,6 +508,119 @@ class ChatRemoteDataSource {
     }
   }
 
+  /// Clears all messages for a conversation (current user only).
+  /// DELETE /api/v1/chat/conversations/{conv_id}/messages → 204
+  Future<void> clearChatMessages({
+    required String conversationId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/conversations/$conversationId/messages',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to clear chat.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Deletes a conversation (current user only).
+  /// DELETE /api/v1/chat/conversations/{conv_id} → 204
+  Future<void> deleteConversation({
+    required String conversationId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/conversations/$conversationId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to delete conversation.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Sets mute state on a conversation.
+  /// PUT /api/v1/chat/conversations/{conv_id}/mute with body { "is_muted": true/false }.
+  Future<bool> toggleMuteConversation({
+    required String conversationId,
+    required String token,
+    required bool isMuted,
+  }) async {
+    try {
+      final response = await _dio.put<dynamic>(
+        '/api/v1/chat/conversations/$conversationId/mute',
+        data: <String, dynamic>{'is_muted': isMuted},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        final serverValue = _asBool(data['is_muted']);
+        if (serverValue != null) return serverValue;
+      }
+      // If server returns 200 without body, trust requested state.
+      return isMuted;
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to toggle mute.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Future<List<User>> fetchContacts() async {
     try {
       await Future.delayed(const Duration(milliseconds: 600));
@@ -598,6 +711,11 @@ class ChatRemoteDataSource {
       unreadCount: _asInt(json['unread_count']) ?? 0,
       isOnline: json['is_online'] == true,
       peerUserId: peerUserId,
+      isMuted:
+          _asBool(json['is_muted']) ??
+          _asBool(json['isMuted']) ??
+          _asBool(json['muted']) ??
+          false,
     );
   }
 
@@ -629,6 +747,18 @@ class ChatRemoteDataSource {
     if (value is int) return value;
     if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  bool? _asBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1') return true;
+      if (normalized == 'false' || normalized == '0') return false;
+    }
     return null;
   }
 

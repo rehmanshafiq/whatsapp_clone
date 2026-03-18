@@ -779,6 +779,79 @@ class ChatRepository {
     return matches.isNotEmpty ? matches.first : null;
   }
 
+  /// Clears all messages for [conversationId] via API, then wipes local messages
+  /// and resets the channel's last message text.
+  Future<void> clearChatMessages(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.clearChatMessages(
+      conversationId: conversationId,
+      token: token,
+    );
+    // Remove local messages for this channel
+    final messages = _storageService.getMessages();
+    messages.removeWhere((m) => m.channelId == conversationId);
+    _storageService.saveMessages(messages);
+    // Reset last message on the channel
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == conversationId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(lastMessage: '');
+      _storageService.saveChats(chats);
+    }
+  }
+
+  /// Deletes a conversation via API, then removes the channel and its messages
+  /// from local storage.
+  Future<void> deleteConversationRemote(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.deleteConversation(
+      conversationId: conversationId,
+      token: token,
+    );
+    // Remove locally
+    deleteChat(conversationId);
+  }
+
+  /// Toggles mute on a conversation via API. Returns the new muted state
+  /// and updates the local channel.
+  Future<bool> toggleMuteConversation(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == conversationId);
+    final currentMuted = idx >= 0 ? chats[idx].isMuted : false;
+    final desiredMuted = !currentMuted;
+
+    final isMuted = await _remoteDataSource.toggleMuteConversation(
+      conversationId: conversationId,
+      token: token,
+      isMuted: desiredMuted,
+    );
+    // Update local channel
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(isMuted: isMuted);
+      _storageService.saveChats(chats);
+    }
+    return isMuted;
+  }
+
   /// Fetches presence (online status, last_seen) for the peer user of [channelId].
   /// Returns the channel with updated isOnline and lastSeen, or null on failure.
   Future<ChatChannel?> fetchPresenceForChannel(String channelId) async {
