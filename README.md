@@ -150,43 +150,43 @@ Remote Data Source (REST + WebSocket)
 
 ### Sign Up
 
-![Chat List](assets/screenshots/signup.png)
+<img src="assets/screenshots/signup.png" width="300" />
 
 ### Login
 
-![Chat List](assets/screenshots/login.png)
+<img src="assets/screenshots/login.png" width="300" />
 
 ### Chat List
 
-![Chat List](assets/screenshots/chat_list.png)
+<img src="assets/screenshots/chat_list.png" width="300" />
 
 ### Chat Screen
 
-![Chat Screen](assets/screenshots/chat_screen.png)
+<img src="assets/screenshots/chat_screen.png" width="300" />
 
 ### Profile Screen
 
-![Profile](assets/screenshots/profile.png)
+<img src="assets/screenshots/profile.png" width="300" />
 
 ### Camera Screen
 
-![Chat List](assets/screenshots/camera.png)
+<img src="assets/screenshots/camera.png" width="300" />
 
 ### Gallery Screen
 
-![Chat List](assets/screenshots/gallery.png)
+<img src="assets/screenshots/gallery.png" width="300" />
 
 ### Attachments Screen
 
-![Chat List](assets/screenshots/attachments.png)
+<img src="assets/screenshots/attachments.png" width="300" />
 
 ### Contact Screen Empty
 
-![Chat List](assets/screenshots/search_empty.png)
+<img src="assets/screenshots/search_empty.png" width="300" />
 
 ### Contact Screen
 
-![Chat List](assets/screenshots/search_contact.png)
+<img src="assets/screenshots/search_contact.png" width="300" />
 
 ---
 
