@@ -621,6 +621,197 @@ class ChatRemoteDataSource {
     }
   }
 
+  /// Blocks a user and prevents messaging in both directions.
+  /// POST /api/v1/chat/users/{user_id}/block
+  Future<void> blockUser({
+    required String userId,
+    required String token,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/users/$userId/block',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to block user.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Unblocks a previously blocked user.
+  /// DELETE /api/v1/chat/users/{user_id}/block
+  Future<void> unblockUser({
+    required String userId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/users/$userId/block',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to unblock user.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Returns currently blocked users for authenticated user.
+  /// GET /api/v1/chat/blocked-users
+  Future<List<UserSearchResult>> fetchBlockedUsers({
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/blocked-users',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      // Backend may return either:
+      // - List<user> (legacy / docs)
+      // - { blocked_users: List<user>, blocked_by_me: [...], blocked_by_others: [...] }
+      final dynamic listCandidate = switch (data) {
+        List _ => data,
+        Map<String, dynamic> _ => data['blocked_users'],
+        _ => null,
+      };
+
+      if (listCandidate is! List) {
+        throw ApiException(
+          message:
+              'Invalid blocked users response from server. Expected a list or { blocked_users: [...] }.',
+          statusCode: 500,
+        );
+      }
+
+      return listCandidate
+          .whereType<Map<String, dynamic>>()
+          .map(_mapUserSearch)
+          .toList();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to load blocked users.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Returns a set of all blocked user ids (blocked by me OR blocked by others).
+  /// GET /api/v1/chat/blocked-users
+  Future<Set<String>> fetchBlockedUserIds({
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/blocked-users',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+
+      if (data is Map<String, dynamic>) {
+        final ids = <String>{};
+        final blockedByMe = data['blocked_by_me'];
+        final blockedByOthers = data['blocked_by_others'];
+        if (blockedByMe is List) {
+          ids.addAll(
+            blockedByMe.map((e) => _asString(e)).whereType<String>(),
+          );
+        }
+        if (blockedByOthers is List) {
+          ids.addAll(
+            blockedByOthers.map((e) => _asString(e)).whereType<String>(),
+          );
+        }
+        // Some backends may only send blocked_users objects.
+        final blockedUsers = data['blocked_users'];
+        if (blockedUsers is List) {
+          ids.addAll(
+            blockedUsers
+                .whereType<Map<String, dynamic>>()
+                .map((m) => _asString(m['user_id']))
+                .whereType<String>(),
+          );
+        }
+        return ids;
+      }
+
+      // If backend returns a list, we cannot infer ids reliably from docs shape.
+      return <String>{};
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to load blocked users.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Future<List<User>> fetchContacts() async {
     try {
       await Future.delayed(const Duration(milliseconds: 600));

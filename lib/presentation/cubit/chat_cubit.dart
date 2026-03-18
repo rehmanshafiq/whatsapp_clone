@@ -336,6 +336,36 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  Future<void> blockUser(String userId) async {
+    try {
+      await _repository.blockUser(userId);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> unblockUser(String userId) async {
+    try {
+      await _repository.unblockUser(userId);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<UserSearchResult>> getBlockedUsers() async {
+    try {
+      return await _repository.getBlockedUsers();
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Future<void> sendMessage(String channelId, String text) async {
     if (text.trim().isEmpty) return;
 
@@ -387,6 +417,10 @@ class ChatCubit extends Cubit<ChatState> {
     }
     if (eventType == 'presence_update') {
       _handlePresenceUpdate(raw);
+      return;
+    }
+    if (eventType == 'block_status') {
+      _handleBlockStatus(raw);
       return;
     }
     if (eventType == 'message_sent_ack') {
@@ -894,6 +928,32 @@ class ChatCubit extends Cubit<ChatState> {
         channels: channels,
         isOnline: isSelectedPeer ? isOnline : state.isOnline,
       ));
+    }
+  }
+
+  void _handleBlockStatus(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+
+    final blocked = data['blocked'] == true;
+    final blockedId =
+        _stringFrom(data['blocked_id']) ?? _stringFrom(data['user_id']);
+    if (blockedId == null || blockedId.isEmpty) return;
+
+    if (blocked) {
+      final updatedChannels = List<ChatChannel>.from(state.channels)
+        ..removeWhere(
+          (c) =>
+              c.peerUserId == blockedId ||
+              c.id == 'channel_$blockedId' ||
+              c.id == blockedId,
+        );
+      emit(state.copyWith(channels: updatedChannels));
+    } else {
+      // Unblocked: refresh from server so chat list reappears if backend includes it.
+      refreshChatList();
     }
   }
 

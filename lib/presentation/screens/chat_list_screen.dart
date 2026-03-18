@@ -17,6 +17,7 @@ import '../cubit/chat_state.dart';
 import '../widgets/chat_list_item.dart';
 import '../widgets/shimmer_list.dart';
 import '../widgets/chat_avatar.dart';
+import 'blocked_users_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -185,6 +186,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
               color: AppColors.iconMuted,
             ),
             onPressed: () => _toggleSearch(cubit),
+          ),
+          IconButton(
+            icon: const Icon(Icons.block, color: AppColors.iconMuted),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const BlockedUsersScreen(),
+                ),
+              );
+            },
+            tooltip: 'Blocked users',
           ),
           IconButton(
             icon: const Icon(Icons.logout, color: AppColors.iconMuted),
@@ -592,6 +604,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     _confirmClearChat(ctx, cubit, channel);
                   },
                 ),
+                // Block user
+                ListTile(
+                  leading: const Icon(Icons.block, color: Colors.redAccent),
+                  title: const Text(
+                    'Block',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmBlockUser(ctx, cubit, channel);
+                  },
+                ),
                 // Delete conversation
                 ListTile(
                   leading: const Icon(
@@ -786,6 +810,90 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
           content: Text('Failed to delete conversation: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _confirmBlockUser(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title: const Text(
+          'Block user',
+          style: TextStyle(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Block ${channel.name}? You and this user will no longer be able to message each other.',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _executeBlockUser(ctx, cubit, channel);
+            },
+            child: const Text(
+              'Block',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeBlockUser(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) async {
+    final userId = channel.peerUserId;
+    if (userId == null || userId.isEmpty) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to block this user right now'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await cubit.blockUser(userId);
+      await cubit.loadChats();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('${channel.name} blocked'),
+          backgroundColor: AppColors.appBar,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Failed to block user: $e'),
           backgroundColor: Colors.redAccent,
         ),
       );

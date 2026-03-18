@@ -68,8 +68,25 @@ class ChatRepository {
 
       await _webSocketService.connect(token: token);
       final remoteChats = await _remoteDataSource.fetchChats(token: token);
-      _storageService.saveChats(remoteChats);
-      return remoteChats;
+      // Filter out chats with blocked users so they don't reappear after refresh.
+      Set<String> blockedIds = <String>{};
+      try {
+        blockedIds = await _remoteDataSource.fetchBlockedUserIds(token: token);
+      } catch (_) {
+        // If blocked endpoint fails, fall back to showing chats.
+      }
+
+      final filtered = blockedIds.isEmpty
+          ? remoteChats
+          : remoteChats
+              .where((c) =>
+                  c.peerUserId == null ||
+                  c.peerUserId!.isEmpty ||
+                  !blockedIds.contains(c.peerUserId))
+              .toList();
+
+      _storageService.saveChats(filtered);
+      return filtered;
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -850,6 +867,39 @@ class ChatRepository {
       _storageService.saveChats(chats);
     }
     return isMuted;
+  }
+
+  Future<void> blockUser(String userId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.blockUser(userId: userId, token: token);
+  }
+
+  Future<void> unblockUser(String userId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.unblockUser(userId: userId, token: token);
+  }
+
+  Future<List<UserSearchResult>> getBlockedUsers() async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.fetchBlockedUsers(token: token);
   }
 
   /// Fetches presence (online status, last_seen) for the peer user of [channelId].
