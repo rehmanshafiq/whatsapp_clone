@@ -98,7 +98,9 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     // attachment_url.
     final path = widget.message.audioPath ?? widget.message.mediaUrl;
     if (path == null) return;
-    final resolvedPath = path.startsWith('/')
+    // Only treat as server-relative if it looks like backend path (/uploads/...).
+    // Do NOT prepend baseUrl for local absolute paths (e.g. /data/user/0/... on Android).
+    final resolvedPath = path.startsWith('/uploads/')
         ? '${AppConstants.apiBaseUrl}$path'
         : path;
 

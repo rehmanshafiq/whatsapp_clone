@@ -25,11 +25,11 @@ String _messageDisplayText(String body) =>
 bool _isDeletedMessage(String body) => body == 'message deleted';
 
 /// Backend may return server-relative media URLs like `/uploads/...`.
-/// UI components should treat those as network URLs, not local files.
+/// Only prepend baseUrl for those; leave local absolute paths (e.g. /data/... on Android) unchanged.
 String? _resolveMediaUrl(String? url) {
   if (url == null || url.isEmpty) return null;
   if (url.startsWith('http')) return url;
-  if (url.startsWith('/')) return '${AppConstants.apiBaseUrl}$url';
+  if (url.startsWith('/uploads/')) return '${AppConstants.apiBaseUrl}$url';
   return url;
 }
 

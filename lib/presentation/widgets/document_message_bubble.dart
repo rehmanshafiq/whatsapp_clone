@@ -166,7 +166,8 @@ class DocumentMessageBubble extends StatelessWidget {
     }
 
     // For server-relative or absolute URLs, open via browser / external app.
-    final isRemote = path.startsWith('http') || path.startsWith('/');
+    // Only treat /uploads/... as server path; local paths like /data/... stay as file.
+    final isRemote = path.startsWith('http') || path.startsWith('/uploads/');
     if (isRemote) {
       final url = path.startsWith('http')
           ? path
