@@ -294,54 +294,62 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
 
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 4),
       decoration: BoxDecoration(
         color: AppColors.inputBar,
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Container(
             width: 3,
-            height: 34,
-            margin: const EdgeInsets.only(right: 8),
+            height: 44,
+            margin: const EdgeInsets.fromLTRB(10, 9, 10, 0),
             decoration: BoxDecoration(
               color: AppColors.accent,
               borderRadius: BorderRadius.circular(2),
             ),
           ),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  replySender,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.accent,
-                    fontWeight: FontWeight.w600,
-                    fontSize: 12,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    replySender,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 1),
-                Text(
-                  replyText,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
+                  const SizedBox(height: 2),
+                  Text(
+                    replyText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
-          IconButton(
-            icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
-            onPressed: widget.onCancelReply,
-            splashRadius: 18,
+          Padding(
+            padding: const EdgeInsets.only(top: 2, right: 2),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
+              onPressed: widget.onCancelReply,
+              splashRadius: 18,
+              visualDensity: VisualDensity.compact,
+            ),
           ),
         ],
       ),
