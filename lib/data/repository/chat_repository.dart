@@ -133,8 +133,15 @@ class ChatRepository {
       }
       final page =
           await _remoteDataSource.fetchMessages(channelId, token: token, limit: limit);
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
+      final existingById = <String, Message>{
+        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+      };
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
@@ -173,10 +180,15 @@ class ChatRepository {
         before: beforeMessageId,
         cursor: cursor,
       );
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       // Merge into storage: older messages go to the front of the channel's list
       final allMessages = _storageService.getMessages();
       final existing = allMessages.where((m) => m.channelId == channelId).toList();
+      final existingById = <String, Message>{for (final m in existing) m.id: m};
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       final existingIds = existing.map((m) => m.id).toSet();
       final newOlder = normalized
           .where((m) => !existingIds.contains(m.id))
@@ -217,6 +229,18 @@ class ChatRepository {
     return _normalizeMessageSenderIds(messages);
   }
 
+  List<Message> _mergeReactionsFromLocal({
+    required List<Message> incoming,
+    required Map<String, Message> existingById,
+  }) {
+    return incoming.map((m) {
+      if (m.reactions.isNotEmpty) return m;
+      final existing = existingById[m.id];
+      if (existing == null || existing.reactions.isEmpty) return m;
+      return m.copyWith(reactions: existing.reactions);
+    }).toList();
+  }
+
   /// Fetches messages for [channelId] from the server and updates local
   /// storage. Use for polling so new messages appear without WebSocket.
   Future<List<Message>> refreshMessagesFromServer(String channelId) async {
@@ -232,8 +256,15 @@ class ChatRepository {
         token: token,
         limit: ChatRemoteDataSource.defaultMessagesLimit,
       );
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
+      final existingById = <String, Message>{
+        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+      };
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
@@ -1336,6 +1367,30 @@ class ChatRepository {
       'event': 'recording_stop',
       'data': <String, dynamic>{
         'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends react_to_message over websocket.
+  /// If [emoji] is empty, server removes the current user's reaction.
+  void sendReactToMessage({
+    required String messageId,
+    required String conversationId,
+    required String peerUserId,
+    required String emoji,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'react_to_message',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'emoji': emoji,
         'peer_user_id': peerUserId,
       },
       'timestamp': DateTime.now().millisecondsSinceEpoch,

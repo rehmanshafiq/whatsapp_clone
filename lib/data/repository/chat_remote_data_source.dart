@@ -518,7 +518,47 @@ class ChatRemoteDataSource {
       viewOnceOpenedAt: viewOnceOpenedAt,
       replyToMessageId: replyToMessageId,
       isForwarded: isForwarded,
+      reactions: _parseReactionsFromApi(json),
     );
+  }
+
+  Map<String, List<String>> _parseReactionsFromApi(Map<String, dynamic> json) {
+    final raw = json['reactions'];
+    if (raw == null) return const {};
+
+    // Shape A: { "👍": ["user1","user2"], "😂": ["user3"] }
+    if (raw is Map<String, dynamic>) {
+      final mapped = <String, List<String>>{};
+      raw.forEach((emoji, usersRaw) {
+        if (emoji.isEmpty) return;
+        if (usersRaw is List) {
+          final users = usersRaw
+              .map((u) => u?.toString() ?? '')
+              .where((u) => u.isNotEmpty)
+              .toList();
+          if (users.isNotEmpty) mapped[emoji] = users;
+        }
+      });
+      if (mapped.isNotEmpty) return mapped;
+    }
+
+    // Shape B: [ { "emoji":"👍", "user_id":"u1" }, ... ]
+    if (raw is List) {
+      final mapped = <String, List<String>>{};
+      for (final item in raw) {
+        if (item is! Map<String, dynamic>) continue;
+        final emoji = item['emoji']?.toString() ?? '';
+        final userId = (item['user_id'] ?? item['userId'])?.toString() ?? '';
+        if (emoji.isEmpty || userId.isEmpty) continue;
+        mapped.putIfAbsent(emoji, () => <String>[]);
+        if (!mapped[emoji]!.contains(userId)) {
+          mapped[emoji]!.add(userId);
+        }
+      }
+      if (mapped.isNotEmpty) return mapped;
+    }
+
+    return const {};
   }
 
   /// Open a view-once message. Returns temporary attachment_url (valid 60 seconds).

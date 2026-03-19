@@ -473,6 +473,10 @@ class ChatCubit extends Cubit<ChatState> {
       _handleConversationUpserted(raw);
       return;
     }
+    if (eventType == 'message_reaction') {
+      _handleMessageReaction(raw);
+      return;
+    }
 
     // Only process message events (send_message, new_message, or legacy payload without event)
     final isMessageEvent = eventType == null ||
@@ -941,6 +945,26 @@ class ChatCubit extends Cubit<ChatState> {
     _repository.upsertChannel(updated);
     
     emit(state.copyWith(channels: channels));
+  }
+
+  void _handleMessageReaction(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final messageId = _stringFrom(data['message_id']);
+    final conversationId = _stringFrom(data['conversation_id']);
+    final userIdRaw = _stringFrom(data['user_id']);
+    final emoji = _stringFrom(data['emoji']) ?? '';
+    if (messageId == null || conversationId == null || userIdRaw == null) return;
+    final userId = _normalizeReactionUserId(userIdRaw);
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: conversationId,
+      userId: userId,
+      emoji: emoji,
+    );
   }
 
   void _handleMessageDeleted(Map<String, dynamic> raw) {
@@ -1552,28 +1576,128 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   void reactToMessage(String messageId, String emoji) {
+    final message = _messageById(messageId);
+    if (message == null) return;
+
+    final currentEmoji = _emojiForUser(
+      reactions: message.reactions,
+      userId: AppConstants.currentUserId,
+    );
+    final nextEmoji = currentEmoji == emoji ? '' : emoji;
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: message.channelId,
+      userId: AppConstants.currentUserId,
+      emoji: nextEmoji,
+    );
+
+    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendReactToMessage(
+        messageId: messageId,
+        conversationId: message.channelId,
+        emoji: nextEmoji,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  void removeReaction(String messageId, String emoji) {
+    final message = _messageById(messageId);
+    if (message == null) return;
+    final currentEmoji = _emojiForUser(
+      reactions: message.reactions,
+      userId: AppConstants.currentUserId,
+    );
+    if (currentEmoji != emoji) return;
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: message.channelId,
+      userId: AppConstants.currentUserId,
+      emoji: '',
+    );
+
+    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendReactToMessage(
+        messageId: messageId,
+        conversationId: message.channelId,
+        emoji: '',
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  String? _emojiForUser({
+    required Map<String, List<String>> reactions,
+    required String userId,
+  }) {
+    final normalizedUserId = _normalizeReactionUserId(userId);
+    for (final entry in reactions.entries) {
+      if (entry.value.contains(normalizedUserId)) return entry.key;
+    }
+    return null;
+  }
+
+  String _normalizeReactionUserId(String userId) {
+    final myBackendId = _repository.getCurrentUserId();
+    if (myBackendId != null &&
+        myBackendId.isNotEmpty &&
+        userId == myBackendId) {
+      return AppConstants.currentUserId;
+    }
+    return userId;
+  }
+
+  void _applyReactionUpdate({
+    required String messageId,
+    required String conversationId,
+    required String userId,
+    required String emoji,
+  }) {
+    final normalizedUserId = _normalizeReactionUserId(userId);
+    final myBackendId = _repository.getCurrentUserId();
+    final idsToRemove = <String>{normalizedUserId};
+    if (normalizedUserId == AppConstants.currentUserId &&
+        myBackendId != null &&
+        myBackendId.isNotEmpty) {
+      // Migrate any older reaction entries that used backend UUID.
+      idsToRemove.add(myBackendId);
+    }
+
     final updatedMessages = state.messages.map((m) {
-      if (m.id != messageId) return m;
+      if (m.id != messageId || m.channelId != conversationId) return m;
       final reactions = Map<String, List<String>>.from(
         m.reactions.map((k, v) => MapEntry(k, List<String>.from(v))),
       );
-      final users = reactions[emoji] ?? [];
-      if (users.contains(AppConstants.currentUserId)) {
-        users.remove(AppConstants.currentUserId);
+
+      // One reaction per user per message.
+      for (final key in reactions.keys.toList()) {
+        final users = reactions[key]!;
+        users.removeWhere((u) => idsToRemove.contains(u));
         if (users.isEmpty) {
-          reactions.remove(emoji);
+          reactions.remove(key);
         } else {
-          reactions[emoji] = users;
+          reactions[key] = users;
         }
-      } else {
-        reactions[emoji] = [...users, AppConstants.currentUserId];
       }
+
+      if (emoji.isNotEmpty) {
+        final users = reactions[emoji] ?? <String>[];
+        if (!users.contains(normalizedUserId)) users.add(normalizedUserId);
+        reactions[emoji] = users;
+      }
+
       return m.copyWith(reactions: reactions);
     }).toList();
-    emit(state.copyWith(messages: updatedMessages));
 
-    final msg = updatedMessages.firstWhere((m) => m.id == messageId);
-    _repository.updateMessageReactions(messageId, msg.reactions);
+    emit(state.copyWith(messages: updatedMessages));
+    final msg = updatedMessages.where((m) => m.id == messageId).firstOrNull;
+    if (msg != null) {
+      _repository.updateMessageReactions(messageId, msg.reactions);
+    }
   }
 
   void updateSearchQuery(String query) {
