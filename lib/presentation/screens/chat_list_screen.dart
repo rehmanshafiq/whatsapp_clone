@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/constants/app_constants.dart';
+import '../../core/network/api_exception.dart';
+import '../../data/models/chat_channel.dart';
 import '../../data/models/user_search.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
@@ -15,6 +17,7 @@ import '../cubit/chat_state.dart';
 import '../widgets/chat_list_item.dart';
 import '../widgets/shimmer_list.dart';
 import '../widgets/chat_avatar.dart';
+import 'blocked_users_screen.dart';
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -25,6 +28,7 @@ class ChatListScreen extends StatefulWidget {
 
 class _ChatListScreenState extends State<ChatListScreen> {
   bool _isSearching = false;
+  String _localSearchQuery = '';
   final _searchController = TextEditingController();
   Timer? _searchDebounce;
 
@@ -70,13 +74,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
       _isSearching = !_isSearching;
       if (!_isSearching) {
         _searchController.clear();
-        cubit.updateSearchQuery('');
+        _localSearchQuery = '';
       }
     });
   }
 
   void _onSearchChanged(ChatCubit cubit, String value) {
-    cubit.updateSearchQuery(value);
+    setState(() {
+      _localSearchQuery = value;
+    });
   }
 
   Future<void> _logout(BuildContext context) async {
@@ -182,6 +188,17 @@ class _ChatListScreenState extends State<ChatListScreen> {
             onPressed: () => _toggleSearch(cubit),
           ),
           IconButton(
+            icon: const Icon(Icons.block, color: AppColors.iconMuted),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const BlockedUsersScreen(),
+                ),
+              );
+            },
+            tooltip: 'Blocked users',
+          ),
+          IconButton(
             icon: const Icon(Icons.logout, color: AppColors.iconMuted),
             onPressed: () => _logout(context),
             tooltip: 'Logout',
@@ -192,7 +209,6 @@ class _ChatListScreenState extends State<ChatListScreen> {
         buildWhen: (previous, current) {
           if (previous.isLoading != current.isLoading) return true;
           if (previous.error != current.error) return true;
-          if (previous.searchQuery != current.searchQuery) return true;
           // Equatable equality on lists inside ChatState will trigger build
           if (previous.channels != current.channels) return true;
           return false;
@@ -220,7 +236,14 @@ class _ChatListScreenState extends State<ChatListScreen> {
             );
           }
 
-          final channels = state.filteredChannels;
+          // Filter channels locally instead of using the shared cubit searchQuery
+          final channels = _localSearchQuery.isEmpty
+              ? state.channels
+              : state.channels.where((c) {
+                  final query = _localSearchQuery.toLowerCase();
+                  return c.name.toLowerCase().contains(query) ||
+                      c.lastMessage.toLowerCase().contains(query);
+                }).toList();
 
           if (channels.isEmpty) {
             return Center(
@@ -234,7 +257,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    state.searchQuery.isNotEmpty
+                    _localSearchQuery.isNotEmpty
                         ? 'No chats found'
                         : 'No conversations yet',
                     style: const TextStyle(
@@ -268,6 +291,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       pathParameters: {'id': channel.id},
                     );
                   },
+                  onLongPress: () => _showChatActionSheet(context, channel),
                 );
               },
             ),
@@ -526,6 +550,358 @@ class _ChatListScreenState extends State<ChatListScreen> {
         ),
       ],
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Long-press action sheet
+  // ---------------------------------------------------------------------------
+
+  void _showChatActionSheet(BuildContext ctx, ChatChannel channel) {
+    final cubit = ctx.read<ChatCubit>();
+
+    showModalBottomSheet<void>(
+      context: ctx,
+      backgroundColor: AppColors.appBar,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (_) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Mute / Unmute
+                ListTile(
+                  leading: Icon(
+                    channel.isMuted
+                        ? Icons.volume_up_outlined
+                        : Icons.volume_off_outlined,
+                    color: AppColors.textPrimary,
+                  ),
+                  title: Text(
+                    channel.isMuted ? 'Unmute' : 'Mute',
+                    style: const TextStyle(color: AppColors.textPrimary),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _handleToggleMute(ctx, cubit, channel);
+                  },
+                ),
+                // Clear chat
+                ListTile(
+                  leading: const Icon(
+                    Icons.cleaning_services_outlined,
+                    color: AppColors.textPrimary,
+                  ),
+                  title: const Text(
+                    'Clear chat',
+                    style: TextStyle(color: AppColors.textPrimary),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmClearChat(ctx, cubit, channel);
+                  },
+                ),
+                // Block user
+                ListTile(
+                  leading: const Icon(Icons.block, color: Colors.redAccent),
+                  title: const Text(
+                    'Block',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmBlockUser(ctx, cubit, channel);
+                  },
+                ),
+                // Delete conversation
+                ListTile(
+                  leading: const Icon(
+                    Icons.delete_outline,
+                    color: Colors.redAccent,
+                  ),
+                  title: const Text(
+                    'Delete conversation',
+                    style: TextStyle(color: Colors.redAccent),
+                  ),
+                  onTap: () {
+                    Navigator.pop(ctx);
+                    _confirmDeleteConversation(ctx, cubit, channel);
+                  },
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _handleToggleMute(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) async {
+    try {
+      await cubit.toggleMute(channel.id);
+      if (!ctx.mounted) return;
+      final newState = channel.isMuted ? 'unmuted' : 'muted';
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Chat $newState'),
+          backgroundColor: AppColors.appBar,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Failed to toggle mute: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _confirmClearChat(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title: const Text(
+          'Clear chat',
+          style: TextStyle(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Clear all messages with ${channel.name}? This cannot be undone.',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _executeClearChat(ctx, cubit, channel.id);
+            },
+            child: const Text(
+              'Clear',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeClearChat(
+    BuildContext ctx,
+    ChatCubit cubit,
+    String conversationId,
+  ) async {
+    try {
+      await cubit.clearChat(conversationId);
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('Chat cleared'),
+          backgroundColor: AppColors.appBar,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Failed to clear chat: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _confirmDeleteConversation(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title: const Text(
+          'Delete conversation',
+          style: TextStyle(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Delete conversation with ${channel.name}? This cannot be undone.',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _executeDeleteConversation(ctx, cubit, channel.id);
+            },
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeDeleteConversation(
+    BuildContext ctx,
+    ChatCubit cubit,
+    String conversationId,
+  ) async {
+    try {
+      await cubit.deleteConversation(conversationId);
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('Conversation deleted'),
+          backgroundColor: AppColors.appBar,
+          duration: Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Failed to delete conversation: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+  }
+
+  void _confirmBlockUser(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) {
+    showDialog<void>(
+      context: ctx,
+      builder: (dialogCtx) => AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title: const Text(
+          'Block user',
+          style: TextStyle(color: AppColors.textPrimary),
+        ),
+        content: Text(
+          'Block ${channel.name}? You and this user will no longer be able to message each other.',
+          style: const TextStyle(color: AppColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogCtx),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(dialogCtx);
+              _executeBlockUser(ctx, cubit, channel);
+            },
+            child: const Text(
+              'Block',
+              style: TextStyle(color: Colors.redAccent),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _executeBlockUser(
+    BuildContext ctx,
+    ChatCubit cubit,
+    ChatChannel channel,
+  ) async {
+    final userId = channel.peerUserId;
+    if (userId == null || userId.isEmpty) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        const SnackBar(
+          content: Text('Unable to block this user right now'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+      return;
+    }
+
+    try {
+      await cubit.blockUser(userId);
+      await cubit.loadChats();
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('${channel.name} blocked',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+          ),),
+          backgroundColor: AppColors.appBar,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    } on ApiException catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text(e.message),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    } catch (e) {
+      if (!ctx.mounted) return;
+      ScaffoldMessenger.of(ctx).showSnackBar(
+        SnackBar(
+          content: Text('Failed to block user: $e'),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
   }
 }
 

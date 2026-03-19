@@ -67,7 +67,7 @@ class AudioPlaybackService {
     _attachListeners();
   }
 
-  Future<void> play(String messageId, String filePath) async {
+  Future<void> play(String messageId, String pathOrUrl) async {
     if (_currentlyPlayingId == messageId) {
       final state = _player.state;
       if (state == PlayerState.playing) {
@@ -82,14 +82,17 @@ class AudioPlaybackService {
       }
     }
 
-    final file = File(filePath);
-    if (!file.existsSync()) {
-      debugPrint('AudioPlayback: file not found at $filePath');
-      return;
-    }
-    if (file.lengthSync() == 0) {
-      debugPrint('AudioPlayback: file is empty at $filePath');
-      return;
+    final isUrl = pathOrUrl.startsWith('http');
+    if (!isUrl) {
+      final file = File(pathOrUrl);
+      if (!file.existsSync()) {
+        debugPrint('AudioPlayback: file not found at $pathOrUrl');
+        return;
+      }
+      if (file.lengthSync() == 0) {
+        debugPrint('AudioPlayback: file is empty at $pathOrUrl');
+        return;
+      }
     }
 
     await _safeCall(() => _player.stop());
@@ -97,7 +100,11 @@ class AudioPlaybackService {
     _playingIdController.add(messageId);
 
     try {
-      await _player.play(DeviceFileSource(filePath));
+      if (isUrl) {
+        await _player.play(UrlSource(pathOrUrl));
+      } else {
+        await _player.play(DeviceFileSource(pathOrUrl));
+      }
     } catch (e) {
       debugPrint('AudioPlayback: play failed, resetting player: $e');
       _currentlyPlayingId = null;

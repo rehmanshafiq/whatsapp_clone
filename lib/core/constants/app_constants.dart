@@ -3,6 +3,7 @@ abstract class AppConstants {
   static const String currentUserName = 'You';
 
   static const String apiBaseUrl = 'https://chatapp-backend-0kxr.onrender.com';
+  static const String apiKey = 'chatapp-test-key';
 
   static const Duration sendDelay = Duration(seconds: 1);
   static const Duration deliverDelay = Duration(seconds: 2);

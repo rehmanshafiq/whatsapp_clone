@@ -9,6 +9,7 @@ class ChatState extends Equatable {
   final List<Message> messages;
   final ChatChannel? selectedChannel;
   final bool isTyping;
+  final bool isRecordingAudio;
   final bool isOnline;
   final bool isSending;
   final bool isLoading;
@@ -23,11 +24,17 @@ class ChatState extends Equatable {
   /// Profile of the currently authenticated user (used for AppBar avatar).
   final UserSearchResult? currentUserProfile;
 
+  /// View-once opened: messageId -> local file path (image fetched with auth).
+  final Map<String, String> viewOnceLocalPaths;
+  /// Message currently selected for reply composer.
+  final Message? replyingTo;
+
   const ChatState({
     this.channels = const [],
     this.messages = const [],
     this.selectedChannel,
     this.isTyping = false,
+    this.isRecordingAudio = false,
     this.isOnline = false,
     this.isSending = false,
     this.isLoading = false,
@@ -39,6 +46,8 @@ class ChatState extends Equatable {
     this.isUserSearchLoading = false,
     this.userSearchError,
     this.currentUserProfile,
+    this.viewOnceLocalPaths = const {},
+    this.replyingTo,
   });
 
   ChatState copyWith({
@@ -46,6 +55,7 @@ class ChatState extends Equatable {
     List<Message>? messages,
     ChatChannel? selectedChannel,
     bool? isTyping,
+    bool? isRecordingAudio,
     bool? isOnline,
     bool? isSending,
     bool? isLoading,
@@ -55,11 +65,14 @@ class ChatState extends Equatable {
     String? searchQuery,
     bool clearSelectedChannel = false,
     bool clearError = false,
+    bool clearReplyingTo = false,
     List<UserSearchResult>? userSearchResults,
     bool? isUserSearchLoading,
     String? userSearchError,
     bool clearUserSearchError = false,
     UserSearchResult? currentUserProfile,
+    Map<String, String>? viewOnceLocalPaths,
+    Message? replyingTo,
   }) {
     return ChatState(
       channels: channels ?? this.channels,
@@ -68,6 +81,7 @@ class ChatState extends Equatable {
           ? null
           : (selectedChannel ?? this.selectedChannel),
       isTyping: isTyping ?? this.isTyping,
+      isRecordingAudio: isRecordingAudio ?? this.isRecordingAudio,
       isOnline: isOnline ?? this.isOnline,
       isSending: isSending ?? this.isSending,
       isLoading: isLoading ?? this.isLoading,
@@ -81,6 +95,8 @@ class ChatState extends Equatable {
           ? null
           : (userSearchError ?? this.userSearchError),
       currentUserProfile: currentUserProfile ?? this.currentUserProfile,
+      viewOnceLocalPaths: viewOnceLocalPaths ?? this.viewOnceLocalPaths,
+      replyingTo: clearReplyingTo ? null : (replyingTo ?? this.replyingTo),
     );
   }
 
@@ -102,6 +118,7 @@ class ChatState extends Equatable {
     messages,
     selectedChannel,
     isTyping,
+    isRecordingAudio,
     isOnline,
     isSending,
     isLoading,
@@ -113,5 +130,7 @@ class ChatState extends Equatable {
     isUserSearchLoading,
     userSearchError,
     currentUserProfile,
+    viewOnceLocalPaths,
+    replyingTo,
   ];
 }

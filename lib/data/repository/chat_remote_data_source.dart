@@ -1,4 +1,7 @@
 import 'dart:convert';
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:dio/dio.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -22,6 +25,17 @@ class MessagesPage {
   });
 
   static const MessagesPage empty = MessagesPage(messages: [], hasMore: false);
+}
+
+/// Result of opening a view-once message (URL valid 60 seconds).
+class ViewOnceOpenResult {
+  final String attachmentUrl;
+  final DateTime viewOnceOpenedAt;
+
+  const ViewOnceOpenResult({
+    required this.attachmentUrl,
+    required this.viewOnceOpenedAt,
+  });
 }
 
 class ChatRemoteDataSource {
@@ -480,6 +494,19 @@ class ChatRemoteDataSource {
         : null;
     final deliveredAt = _asDateTime(json['delivered_at']) ?? _asDateTime(json['deliveredAt']);
     final readAt = _asDateTime(json['read_at']) ?? _asDateTime(json['readAt']);
+    final isViewOnce = json['is_view_once'] == true || json['isViewOnce'] == true;
+    final viewOnceOpenedAt = _asDateTime(json['view_once_opened_at']) ??
+        _asDateTime(json['viewOnceOpenedAt']);
+    final replyToMessageId =
+        _asString(json['reply_to_message_id']) ?? _asString(json['replyToMessageId']);
+    final replyToSenderId =
+        _asString(json['reply_to_sender_id']) ?? _asString(json['replyToSenderId']);
+    final replyToBody =
+        _asString(json['reply_to_body']) ?? _asString(json['replyToBody']);
+    final replyToAttachmentType = _asString(json['reply_to_attachment_type']) ??
+        _asString(json['replyToAttachmentType']);
+    final isForwarded =
+        json['is_forwarded'] == true || json['isForwarded'] == true;
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
@@ -493,7 +520,131 @@ class ChatRemoteDataSource {
       readAt: readAt,
       isEdited: isEdited,
       editedAt: editedAtValid,
+      isViewOnce: isViewOnce,
+      viewOnceOpenedAt: viewOnceOpenedAt,
+      replyToMessageId: replyToMessageId,
+      replyToSenderId: replyToSenderId,
+      replyToBody: replyToBody,
+      replyToAttachmentType: replyToAttachmentType,
+      isForwarded: isForwarded,
+      reactions: _parseReactionsFromApi(json),
     );
+  }
+
+  Map<String, List<String>> _parseReactionsFromApi(Map<String, dynamic> json) {
+    final raw = json['reactions'];
+    if (raw == null) return const {};
+
+    // Shape A: { "👍": ["user1","user2"], "😂": ["user3"] }
+    if (raw is Map<String, dynamic>) {
+      final mapped = <String, List<String>>{};
+      raw.forEach((emoji, usersRaw) {
+        if (emoji.isEmpty) return;
+        if (usersRaw is List) {
+          final users = usersRaw
+              .map((u) => u?.toString() ?? '')
+              .where((u) => u.isNotEmpty)
+              .toList();
+          if (users.isNotEmpty) mapped[emoji] = users;
+        }
+      });
+      if (mapped.isNotEmpty) return mapped;
+    }
+
+    // Shape B: [ { "emoji":"👍", "user_id":"u1" }, ... ]
+    if (raw is List) {
+      final mapped = <String, List<String>>{};
+      for (final item in raw) {
+        if (item is! Map<String, dynamic>) continue;
+        final emoji = item['emoji']?.toString() ?? '';
+        final userId = (item['user_id'] ?? item['userId'])?.toString() ?? '';
+        if (emoji.isEmpty || userId.isEmpty) continue;
+        mapped.putIfAbsent(emoji, () => <String>[]);
+        if (!mapped[emoji]!.contains(userId)) {
+          mapped[emoji]!.add(userId);
+        }
+      }
+      if (mapped.isNotEmpty) return mapped;
+    }
+
+    return const {};
+  }
+
+  /// Open a view-once message. Returns temporary attachment_url (valid 60 seconds).
+  /// POST /api/v1/chat/messages/{message_id}/view-once-open
+  Future<ViewOnceOpenResult> openViewOnceMessage({
+    required String messageId,
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.post<dynamic>(
+        '/api/v1/chat/messages/$messageId/view-once-open',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is! Map<String, dynamic>) {
+        throw const ApiException(
+          message: 'Invalid view-once-open response.',
+          statusCode: 500,
+        );
+      }
+      final attachmentUrl = _asString(data['attachment_url']) ?? '';
+      final openedAtStr = _asString(data['view_once_opened_at']);
+      final viewOnceOpenedAt = openedAtStr != null && openedAtStr.isNotEmpty
+          ? DateTime.tryParse(openedAtStr)
+          : DateTime.now();
+      if (attachmentUrl.isEmpty) {
+        throw const ApiException(
+          message: 'View-once open response missing attachment_url.',
+          statusCode: 500,
+        );
+      }
+      return ViewOnceOpenResult(
+        attachmentUrl: attachmentUrl,
+        viewOnceOpenedAt: viewOnceOpenedAt ?? DateTime.now(),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to open view-once message.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (statusCode == 404) {
+        message = 'Message not found or already opened.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Fetches image bytes with auth (for view-once and other protected media).
+  Future<Uint8List> fetchImageBytes({
+    required String url,
+    required String token,
+  }) async {
+    final fullUrl = url.startsWith('http') ? url : '${AppConstants.apiBaseUrl}$url';
+    final response = await _dio.get<dynamic>(
+      fullUrl,
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: <String, String>{
+          'authorization': 'Bearer $token',
+          'x-api-key': _apiKey,
+        },
+      ),
+    );
+    final data = response.data;
+    if (data == null) throw const ApiException(message: 'Empty image response', statusCode: 500);
+    if (data is! Uint8List) throw const ApiException(message: 'Invalid image response', statusCode: 500);
+    return data;
   }
 
   Future<Message> sendMessage(Message message) async {
@@ -505,6 +656,389 @@ class ChatRemoteDataSource {
         message: 'Failed to send message',
         statusCode: 500,
       );
+    }
+  }
+
+  /// Upload media file. Returns full URL for use in send_message.
+  /// POST /api/v1/upload/media
+  Future<String> uploadMedia({
+    required String filePath,
+    required String type,
+    required String token,
+  }) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw const ApiException(
+          message: 'File not found',
+          statusCode: 400,
+        );
+      }
+      final fileName = filePath.split(RegExp(r'[/\\]')).last;
+      if (fileName.isEmpty) {
+        throw const ApiException(
+          message: 'Invalid file path',
+          statusCode: 400,
+        );
+      }
+
+      final formData = FormData.fromMap({
+        'file': await MultipartFile.fromFile(filePath, filename: fileName),
+      });
+
+      // Backend expects type as query param: /api/v1/upload/media?type=image
+      final response = await _dio.post<dynamic>(
+        '/api/v1/upload/media',
+        data: formData,
+        queryParameters: <String, dynamic>{'type': type},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is! Map<String, dynamic>) {
+        throw const ApiException(
+          message: 'Invalid upload response from server.',
+          statusCode: 500,
+        );
+      }
+
+      final url = _asString(data['url']);
+      if (url == null || url.isEmpty) {
+        throw const ApiException(
+          message: 'Upload response missing url.',
+          statusCode: 500,
+        );
+      }
+
+      // Prepend base URL if the response URL is relative
+      final baseUrl = AppConstants.apiBaseUrl.replaceAll(RegExp(r'/$'), '');
+      final path = url.startsWith('/') ? url : '/$url';
+      return '$baseUrl$path';
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to upload media.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Clears all messages for a conversation (current user only).
+  /// DELETE /api/v1/chat/conversations/{conv_id}/messages → 204
+  Future<void> clearChatMessages({
+    required String conversationId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/conversations/$conversationId/messages',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to clear chat.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Deletes a conversation (current user only).
+  /// DELETE /api/v1/chat/conversations/{conv_id} → 204
+  Future<void> deleteConversation({
+    required String conversationId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/conversations/$conversationId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to delete conversation.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Sets mute state on a conversation.
+  /// PUT /api/v1/chat/conversations/{conv_id}/mute with body { "is_muted": true/false }.
+  Future<bool> toggleMuteConversation({
+    required String conversationId,
+    required String token,
+    required bool isMuted,
+  }) async {
+    try {
+      final response = await _dio.put<dynamic>(
+        '/api/v1/chat/conversations/$conversationId/mute',
+        data: <String, dynamic>{'is_muted': isMuted},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        final serverValue = _asBool(data['is_muted']);
+        if (serverValue != null) return serverValue;
+      }
+      // If server returns 200 without body, trust requested state.
+      return isMuted;
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to toggle mute.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Blocks a user and prevents messaging in both directions.
+  /// POST /api/v1/chat/users/{user_id}/block
+  Future<void> blockUser({
+    required String userId,
+    required String token,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/users/$userId/block',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to block user.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Unblocks a previously blocked user.
+  /// DELETE /api/v1/chat/users/{user_id}/block
+  Future<void> unblockUser({
+    required String userId,
+    required String token,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/users/$userId/block',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to unblock user.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Returns currently blocked users for authenticated user.
+  /// GET /api/v1/chat/blocked-users
+  Future<List<UserSearchResult>> fetchBlockedUsers({
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/blocked-users',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      // Backend may return either:
+      // - List<user> (legacy / docs)
+      // - { blocked_users: List<user>, blocked_by_me: [...], blocked_by_others: [...] }
+      final dynamic listCandidate = switch (data) {
+        List _ => data,
+        Map<String, dynamic> _ => data['blocked_users'],
+        _ => null,
+      };
+
+      if (listCandidate is! List) {
+        throw ApiException(
+          message:
+              'Invalid blocked users response from server. Expected a list or { blocked_users: [...] }.',
+          statusCode: 500,
+        );
+      }
+
+      return listCandidate
+          .whereType<Map<String, dynamic>>()
+          .map(_mapUserSearch)
+          .toList();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to load blocked users.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Returns a set of all blocked user ids (blocked by me OR blocked by others).
+  /// GET /api/v1/chat/blocked-users
+  Future<Set<String>> fetchBlockedUserIds({
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/blocked-users',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+
+      if (data is Map<String, dynamic>) {
+        final ids = <String>{};
+        final blockedByMe = data['blocked_by_me'];
+        final blockedByOthers = data['blocked_by_others'];
+        if (blockedByMe is List) {
+          ids.addAll(
+            blockedByMe.map((e) => _asString(e)).whereType<String>(),
+          );
+        }
+        if (blockedByOthers is List) {
+          ids.addAll(
+            blockedByOthers.map((e) => _asString(e)).whereType<String>(),
+          );
+        }
+        // Some backends may only send blocked_users objects.
+        final blockedUsers = data['blocked_users'];
+        if (blockedUsers is List) {
+          ids.addAll(
+            blockedUsers
+                .whereType<Map<String, dynamic>>()
+                .map((m) => _asString(m['user_id']))
+                .whereType<String>(),
+          );
+        }
+        return ids;
+      }
+
+      // If backend returns a list, we cannot infer ids reliably from docs shape.
+      return <String>{};
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to load blocked users.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
     }
   }
 
@@ -598,6 +1132,11 @@ class ChatRemoteDataSource {
       unreadCount: _asInt(json['unread_count']) ?? 0,
       isOnline: json['is_online'] == true,
       peerUserId: peerUserId,
+      isMuted:
+          _asBool(json['is_muted']) ??
+          _asBool(json['isMuted']) ??
+          _asBool(json['muted']) ??
+          false,
     );
   }
 
@@ -629,6 +1168,18 @@ class ChatRemoteDataSource {
     if (value is int) return value;
     if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  bool? _asBool(dynamic value) {
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final normalized = value.trim().toLowerCase();
+      if (normalized == 'true' || normalized == '1') return true;
+      if (normalized == 'false' || normalized == '0') return false;
+    }
     return null;
   }
 
