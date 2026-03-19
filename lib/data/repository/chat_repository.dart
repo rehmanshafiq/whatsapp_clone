@@ -669,6 +669,96 @@ class ChatRepository {
     }
   }
 
+  Future<Message> forwardMessageToChannel({
+    required String channelId,
+    required Message source,
+  }) async {
+    try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_fwd';
+      final attachmentType = _attachmentTypeForMessage(source);
+      final attachmentUrl = source.mediaUrl ?? '';
+      final body = source.text;
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: body,
+          attachmentType: attachmentType,
+          attachmentUrl: attachmentUrl,
+          isViewOnce: source.isViewOnce,
+          replyToMessageId: source.replyToMessageId ?? '',
+          isForwarded: true,
+        );
+      }
+
+      final message = Message(
+        id: clientMsgId,
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: body,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: source.type,
+        mediaUrl: source.mediaUrl,
+        audioPath: source.audioPath,
+        audioDuration: source.audioDuration,
+        latitude: source.latitude,
+        longitude: source.longitude,
+        locationName: source.locationName,
+        locationAddress: source.locationAddress,
+        isLiveLocation: source.isLiveLocation,
+        isLiveLocationActive: source.isLiveLocationActive,
+        liveLocationEndsAt: source.liveLocationEndsAt,
+        liveLocationUpdatedAt: source.liveLocationUpdatedAt,
+        contactId: source.contactId,
+        contactName: source.contactName,
+        contactPhone: source.contactPhone,
+        contactPhotoBase64: source.contactPhotoBase64,
+        documentFileName: source.documentFileName,
+        documentFileSize: source.documentFileSize,
+        isViewOnce: source.isViewOnce,
+        isForwarded: true,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      updateChannelLastMessage(channelId, _channelPreviewForMessage(message));
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  String _attachmentTypeForMessage(Message message) {
+    if (message.isImage) return 'image';
+    if (message.isVideo) return 'video';
+    if (message.isAudio) return 'voice';
+    if (message.isGif) return 'gif';
+    if (message.isSticker) return 'sticker';
+    if (message.isDocument) return 'document';
+    if (message.isLocation) return 'location';
+    return '';
+  }
+
+  String _channelPreviewForMessage(Message message) {
+    if (message.text.trim().isNotEmpty) return message.text.trim();
+    if (message.isImage) return '\u{1F4F7} Photo';
+    if (message.isVideo) return '\u{1F3A5} Video';
+    if (message.isAudio) return '\u{1F3A4} Voice message';
+    if (message.isDocument) {
+      return '\u{1F4C4} ${message.documentFileName ?? 'Document'}';
+    }
+    if (message.isLocation) return '\u{1F4CD} Location';
+    if (message.isGif) return 'GIF';
+    if (message.isSticker) return 'Sticker';
+    return '\u{1F4DD} Message';
+  }
+
   void _persistMessage(Message message) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == message.id);

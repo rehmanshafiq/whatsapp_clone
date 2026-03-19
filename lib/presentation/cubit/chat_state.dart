@@ -26,6 +26,8 @@ class ChatState extends Equatable {
 
   /// View-once opened: messageId -> local file path (image fetched with auth).
   final Map<String, String> viewOnceLocalPaths;
+  /// Message currently selected for reply composer.
+  final Message? replyingTo;
 
   const ChatState({
     this.channels = const [],
@@ -45,6 +47,7 @@ class ChatState extends Equatable {
     this.userSearchError,
     this.currentUserProfile,
     this.viewOnceLocalPaths = const {},
+    this.replyingTo,
   });
 
   ChatState copyWith({
@@ -62,12 +65,14 @@ class ChatState extends Equatable {
     String? searchQuery,
     bool clearSelectedChannel = false,
     bool clearError = false,
+    bool clearReplyingTo = false,
     List<UserSearchResult>? userSearchResults,
     bool? isUserSearchLoading,
     String? userSearchError,
     bool clearUserSearchError = false,
     UserSearchResult? currentUserProfile,
     Map<String, String>? viewOnceLocalPaths,
+    Message? replyingTo,
   }) {
     return ChatState(
       channels: channels ?? this.channels,
@@ -91,6 +96,7 @@ class ChatState extends Equatable {
           : (userSearchError ?? this.userSearchError),
       currentUserProfile: currentUserProfile ?? this.currentUserProfile,
       viewOnceLocalPaths: viewOnceLocalPaths ?? this.viewOnceLocalPaths,
+      replyingTo: clearReplyingTo ? null : (replyingTo ?? this.replyingTo),
     );
   }
 
@@ -125,5 +131,6 @@ class ChatState extends Equatable {
     userSearchError,
     currentUserProfile,
     viewOnceLocalPaths,
+    replyingTo,
   ];
 }

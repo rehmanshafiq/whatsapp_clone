@@ -361,8 +361,18 @@ class MessageBubble extends StatelessWidget {
       config: ChatReactionsConfig(
         availableReactions: const ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
         enableHapticFeedback: true,
-        showContextMenu: false,
+        showContextMenu: true,
         dialogBackgroundColor: AppColors.appBar,
+        menuItems: const [
+          MenuItem(label: 'Reply', icon: Icons.reply),
+          MenuItem(label: 'Copy', icon: Icons.copy),
+          MenuItem(label: 'Forward', icon: Icons.forward),
+          MenuItem(
+            label: 'Delete',
+            icon: Icons.delete_forever,
+            isDestructive: true,
+          ),
+        ],
       ),
       onReactionAdded: (reaction) {
         reactionsController.addReaction(message.id, reaction);
@@ -373,6 +383,9 @@ class MessageBubble extends StatelessWidget {
         reactionsController.removeReaction(message.id, reaction);
         context.read<ChatCubit>().removeReaction(message.id, reaction);
         onReactionChanged?.call();
+      },
+      onMenuItemTapped: (item) async {
+        await _handleMenuTap(context, item, message);
       },
       child: Column(
         mainAxisSize: MainAxisSize.min,
@@ -394,6 +407,176 @@ class MessageBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+Future<void> _handleMenuTap(
+  BuildContext context,
+  MenuItem item,
+  Message message,
+) async {
+  final cubit = context.read<ChatCubit>();
+  final action = item.label.trim().toLowerCase();
+  if (action == 'reply') {
+    cubit.startReplyTo(message);
+    return;
+  }
+  if (action == 'copy') {
+    await cubit.copyMessageToClipboard(message);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Message copied')),
+    );
+    return;
+  }
+  if (action == 'delete') {
+    if (!message.isOutgoing) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('You can only delete your own messages')),
+      );
+      return;
+    }
+    await cubit.deleteMessage(message);
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Message deleted')),
+    );
+    return;
+  }
+  if (action == 'forward') {
+    final channelIds = await _showForwardPicker(context, message.channelId);
+    if (channelIds.isEmpty) return;
+    await cubit.forwardMessageToChannels(message, channelIds);
+    if (!context.mounted) return;
+    final label = channelIds.length == 1
+        ? 'Forwarded to 1 chat'
+        : 'Forwarded to ${channelIds.length} chats';
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(label)));
+  }
+}
+
+Future<List<String>> _showForwardPicker(
+  BuildContext context,
+  String currentChannelId,
+) async {
+  final cubit = context.read<ChatCubit>();
+  final channels = cubit.state.channels
+      .where((c) => c.id != currentChannelId)
+      .toList()
+    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+  if (channels.isEmpty) return const <String>[];
+
+  final selected = <String>{};
+  final result = await showModalBottomSheet<List<String>>(
+    context: context,
+    isScrollControlled: true,
+    backgroundColor: AppColors.appBar,
+    shape: const RoundedRectangleBorder(
+      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+    ),
+    builder: (ctx) {
+      return SafeArea(
+        top: false,
+        child: StatefulBuilder(
+          builder: (ctx, setModalState) {
+            return SizedBox(
+              height: MediaQuery.of(ctx).size.height * 0.72,
+              child: Column(
+                children: [
+                  const SizedBox(height: 8),
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.divider,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Forward to...',
+                            style: TextStyle(
+                              color: AppColors.textPrimary,
+                              fontSize: 18,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          '${selected.length} selected',
+                          style: const TextStyle(color: AppColors.textSecondary),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: ListView.separated(
+                      itemCount: channels.length,
+                      separatorBuilder: (_, __) => Divider(
+                        color: AppColors.divider.withValues(alpha: 0.5),
+                        height: 1,
+                        indent: 76,
+                      ),
+                      itemBuilder: (_, index) {
+                        final channel = channels[index];
+                        final checked = selected.contains(channel.id);
+                        return CheckboxListTile(
+                          value: checked,
+                          onChanged: (_) {
+                            setModalState(() {
+                              if (checked) {
+                                selected.remove(channel.id);
+                              } else {
+                                selected.add(channel.id);
+                              }
+                            });
+                          },
+                          title: Text(
+                            channel.name,
+                            style: const TextStyle(color: AppColors.textPrimary),
+                          ),
+                          subtitle: Text(
+                            channel.lastMessage,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style:
+                                const TextStyle(color: AppColors.textSecondary),
+                          ),
+                          activeColor: AppColors.accent,
+                          checkColor: Colors.white,
+                        );
+                      },
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                    child: SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: selected.isEmpty
+                            ? null
+                            : () {
+                                Navigator.of(ctx).pop(selected.toList());
+                              },
+                        icon: const Icon(Icons.forward),
+                        label: const Text('Forward'),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        ),
+      );
+    },
+  );
+  return result ?? const <String>[];
 }
 
 class _ContactMessageBubble extends StatelessWidget {
@@ -444,6 +627,13 @@ class _ContactMessageBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (message.replyToMessageId != null)
+                _ReplyPreview(
+                  senderId: message.replyToSenderId,
+                  previewText: message.replyToBody,
+                  attachmentType: message.replyToAttachmentType,
+                  isOutgoing: message.isOutgoing,
+                ),
               Row(
                 children: [
                   _ContactThumb(message: message),
@@ -682,9 +872,52 @@ class _LocationMessageWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final bubble = LocationMessageBubble(message: message);
+    if (message.replyToMessageId == null) {
+      return GestureDetector(
+        onTap: () => _openInMaps(context),
+        child: bubble,
+      );
+    }
     return GestureDetector(
       onTap: () => _openInMaps(context),
-      child: LocationMessageBubble(message: message),
+      child: Align(
+        alignment:
+            message.isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: Container(
+          margin: EdgeInsets.only(
+            left: message.isOutgoing ? 64 : 8,
+            right: message.isOutgoing ? 8 : 64,
+            top: 2,
+            bottom: 2,
+          ),
+          padding: const EdgeInsets.all(4),
+          decoration: BoxDecoration(
+            color: message.isOutgoing
+                ? AppColors.outgoingBubble
+                : AppColors.incomingBubble,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(message.isOutgoing ? 12 : 0),
+              bottomRight: Radius.circular(message.isOutgoing ? 0 : 12),
+            ),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              _ReplyPreview(
+                senderId: message.replyToSenderId,
+                previewText: message.replyToBody,
+                attachmentType: message.replyToAttachmentType,
+                isOutgoing: message.isOutgoing,
+              ),
+              bubble,
+            ],
+          ),
+        ),
+      ),
     );
   }
 
@@ -779,6 +1012,98 @@ class _ReactionRow extends StatelessWidget {
   }
 }
 
+class _ReplyPreview extends StatelessWidget {
+  final String? senderId;
+  final String? previewText;
+  final String? attachmentType;
+  final bool isOutgoing;
+
+  const _ReplyPreview({
+    required this.senderId,
+    required this.previewText,
+    required this.attachmentType,
+    required this.isOutgoing,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final name = (senderId != null && senderId!.isNotEmpty)
+        ? senderId!
+        : (isOutgoing ? 'You' : 'Unknown');
+    String text = (previewText ?? '').trim();
+    final type = (attachmentType ?? '').toLowerCase();
+    if (text.isEmpty) {
+      if (type == 'image') {
+        text = 'Photo';
+      } else if (type == 'video') {
+        text = 'Video';
+      } else if (type == 'audio' || type == 'voice') {
+        text = 'Voice message';
+      } else if (type == 'document') {
+        text = 'Document';
+      } else if (type == 'location') {
+        text = 'Location';
+      } else if (type == 'gif') {
+        text = 'GIF';
+      } else if (type == 'sticker') {
+        text = 'Sticker';
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+      decoration: BoxDecoration(
+        color: AppColors.chatBackground.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(8),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 3,
+            height: 32,
+            margin: const EdgeInsets.only(right: 8, top: 2),
+            decoration: BoxDecoration(
+              color: Colors.purpleAccent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  name,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                if (text.isNotEmpty)
+                  Text(
+                    text,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TextMessageBubble extends StatelessWidget {
   final Message message;
 
@@ -820,6 +1145,13 @@ class _TextMessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (message.replyToMessageId != null)
+              _ReplyPreview(
+                senderId: message.replyToSenderId,
+                previewText: message.replyToBody,
+                attachmentType: message.replyToAttachmentType,
+                isOutgoing: message.isOutgoing,
+              ),
             Text(
               _messageDisplayText(message.text),
               style: TextStyle(
@@ -914,6 +1246,13 @@ class _MediaMessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (!isSticker && message.replyToMessageId != null)
+              _ReplyPreview(
+                senderId: message.replyToSenderId,
+                previewText: message.replyToBody,
+                attachmentType: message.replyToAttachmentType,
+                isOutgoing: message.isOutgoing,
+              ),
             _buildMediaContent(
               context,
               message: message,
@@ -1059,6 +1398,13 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
+            if (widget.message.replyToMessageId != null)
+              _ReplyPreview(
+                senderId: widget.message.replyToSenderId,
+                previewText: widget.message.replyToBody,
+                attachmentType: widget.message.replyToAttachmentType,
+                isOutgoing: widget.message.isOutgoing,
+              ),
             ClipRRect(
               borderRadius: BorderRadius.circular(8),
               child: _error

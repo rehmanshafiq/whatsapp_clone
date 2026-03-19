@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocoding/geocoding.dart';
@@ -388,20 +389,90 @@ class ChatCubit extends Cubit<ChatState> {
 
     emit(state.copyWith(isSending: true));
     try {
+      final effectiveReplyTo = replyToMessageId.isNotEmpty
+          ? replyToMessageId
+          : state.replyingTo?.id ?? '';
       final message = await _repository.sendMessage(
         channelId,
         text.trim(),
-        replyToMessageId: replyToMessageId,
+        replyToMessageId: effectiveReplyTo,
         isForwarded: isForwarded,
       );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+      emit(
+        state.copyWith(
+          messages: updatedMessages,
+          isSending: false,
+          clearReplyingTo: true,
+        ),
+      );
 
       _simulateMessageLifecycle(message);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
+  }
+
+  void startReplyTo(Message message) {
+    if (isClosed) return;
+    emit(state.copyWith(replyingTo: message));
+  }
+
+  void clearReply() {
+    if (isClosed) return;
+    emit(state.copyWith(clearReplyingTo: true));
+  }
+
+  Future<void> copyMessageToClipboard(Message message) async {
+    String text = message.text.trim();
+    if (text.isEmpty) {
+      if (message.isImage) {
+        text = 'Photo';
+      } else if (message.isVideo) {
+        text = 'Video';
+      } else if (message.isAudio) {
+        text = 'Voice message';
+      } else if (message.isDocument) {
+        text = message.documentFileName?.trim().isNotEmpty == true
+            ? message.documentFileName!
+            : 'Document';
+      } else if (message.isLocation) {
+        text = message.locationAddress?.trim().isNotEmpty == true
+            ? message.locationAddress!
+            : 'Location';
+      } else if (message.isGif) {
+        text = 'GIF';
+      } else if (message.isSticker) {
+        text = 'Sticker';
+      }
+    }
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> forwardMessageToChannels(
+    Message sourceMessage,
+    List<String> channelIds,
+  ) async {
+    if (channelIds.isEmpty) return;
+    for (final channelId in channelIds) {
+      try {
+        final forwarded = await _repository.forwardMessageToChannel(
+          channelId: channelId,
+          source: sourceMessage,
+        );
+        if (state.selectedChannel?.id == channelId) {
+          final updatedMessages = List<Message>.from(state.messages)
+            ..add(forwarded);
+          emit(state.copyWith(messages: updatedMessages));
+          _simulateMessageLifecycle(forwarded);
+        }
+      } catch (_) {
+        // Continue forwarding to remaining selected chats.
+      }
+    }
+    _refreshChannelList();
   }
 
   void _handleSocketMessage(dynamic event) {
@@ -717,6 +788,13 @@ class ChatCubit extends Cubit<ChatState> {
           _stringFrom(data['replyToMessageId']);
       final isForwarded =
           data['is_forwarded'] == true || data['isForwarded'] == true;
+      final replyToSenderId = _stringFrom(data['reply_to_sender_id']) ??
+          _stringFrom(data['replyToSenderId']);
+      final replyToBody =
+          _stringFrom(data['reply_to_body']) ?? _stringFrom(data['replyToBody']);
+      final replyToAttachmentType =
+          _stringFrom(data['reply_to_attachment_type']) ??
+              _stringFrom(data['replyToAttachmentType']);
       final viewOnceOpenedAtRaw = data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
       final DateTime? viewOnceOpenedAt = viewOnceOpenedAtRaw != null
           ? (viewOnceOpenedAtRaw is String
@@ -742,6 +820,9 @@ class ChatCubit extends Cubit<ChatState> {
         viewOnceOpenedAt: viewOnceOpenedAt,
         replyToMessageId: replyToMessageId,
         isForwarded: isForwarded,
+        replyToSenderId: replyToSenderId,
+        replyToBody: replyToBody,
+        replyToAttachmentType: replyToAttachmentType,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);
@@ -1830,6 +1911,7 @@ class ChatCubit extends Cubit<ChatState> {
     emit(
       state.copyWith(
         clearSelectedChannel: true,
+        clearReplyingTo: true,
         isTyping: false,
         isRecordingAudio: false,
         isOnline: false,

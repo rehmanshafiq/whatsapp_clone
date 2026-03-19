@@ -431,6 +431,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           cubit.sendRecordingStart(widget.channelId),
                       onRecordingStop: () =>
                           cubit.sendRecordingStop(widget.channelId),
+                      replyingTo: state.replyingTo,
+                      onCancelReply: cubit.clearReply,
                     ),
                   ],
                 ),

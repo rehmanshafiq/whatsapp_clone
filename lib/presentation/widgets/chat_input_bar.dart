@@ -9,6 +9,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/models/message.dart';
 import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
@@ -27,6 +28,8 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback? onRecordingStart;
   /// Called when user stops/cancels/sends recording.
   final VoidCallback? onRecordingStop;
+  final Message? replyingTo;
+  final VoidCallback? onCancelReply;
 
   const ChatInputBar({
     super.key,
@@ -38,6 +41,8 @@ class ChatInputBar extends StatefulWidget {
     this.onTypingStop,
     this.onRecordingStart,
     this.onRecordingStop,
+    this.replyingTo,
+    this.onCancelReply,
   });
 
   @override
@@ -213,7 +218,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           Container(
             color: AppColors.scaffold,
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: _buildInputRow(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.replyingTo != null) _buildReplyPreview(widget.replyingTo!),
+                _buildInputRow(),
+              ],
+            ),
           ),
 
           // Emoji picker panel
@@ -255,6 +266,83 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                 ],
               ),
             ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildReplyPreview(Message replyingTo) {
+    final replySender = replyingTo.isOutgoing ? 'You' : replyingTo.senderId;
+    String replyText = replyingTo.text.trim();
+    if (replyText.isEmpty) {
+      if (replyingTo.isImage) {
+        replyText = 'Photo';
+      } else if (replyingTo.isVideo) {
+        replyText = 'Video';
+      } else if (replyingTo.isAudio) {
+        replyText = 'Voice message';
+      } else if (replyingTo.isDocument) {
+        replyText = replyingTo.documentFileName ?? 'Document';
+      } else if (replyingTo.isLocation) {
+        replyText = 'Location';
+      } else if (replyingTo.isGif) {
+        replyText = 'GIF';
+      } else if (replyingTo.isSticker) {
+        replyText = 'Sticker';
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.inputBar,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 3,
+            height: 34,
+            margin: const EdgeInsets.only(right: 8),
+            decoration: BoxDecoration(
+              color: AppColors.accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  replySender,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.accent,
+                    fontWeight: FontWeight.w600,
+                    fontSize: 12,
+                  ),
+                ),
+                const SizedBox(height: 1),
+                Text(
+                  replyText,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
+            onPressed: widget.onCancelReply,
+            splashRadius: 18,
+          ),
         ],
       ),
     );

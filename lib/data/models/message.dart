@@ -46,6 +46,12 @@ class Message extends Equatable {
   final DateTime? viewOnceOpenedAt;
   /// Original message id this message replies to.
   final String? replyToMessageId;
+  /// Sender id of the original message being replied to.
+  final String? replyToSenderId;
+  /// Truncated preview of the original message body.
+  final String? replyToBody;
+  /// Attachment type of the original message being replied to.
+  final String? replyToAttachmentType;
   /// True when this message was forwarded.
   final bool isForwarded;
 
@@ -82,6 +88,9 @@ class Message extends Equatable {
     this.isViewOnce = false,
     this.viewOnceOpenedAt,
     this.replyToMessageId,
+    this.replyToSenderId,
+    this.replyToBody,
+    this.replyToAttachmentType,
     this.isForwarded = false,
   });
 
@@ -118,6 +127,9 @@ class Message extends Equatable {
     bool? isViewOnce,
     DateTime? viewOnceOpenedAt,
     String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToBody,
+    String? replyToAttachmentType,
     bool? isForwarded,
   }) {
     return Message(
@@ -154,6 +166,10 @@ class Message extends Equatable {
       isViewOnce: isViewOnce ?? this.isViewOnce,
       viewOnceOpenedAt: viewOnceOpenedAt ?? this.viewOnceOpenedAt,
       replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyToSenderId: replyToSenderId ?? this.replyToSenderId,
+      replyToBody: replyToBody ?? this.replyToBody,
+      replyToAttachmentType:
+          replyToAttachmentType ?? this.replyToAttachmentType,
       isForwarded: isForwarded ?? this.isForwarded,
     );
   }
@@ -191,6 +207,9 @@ class Message extends Equatable {
     'isViewOnce': isViewOnce,
     'viewOnceOpenedAt': viewOnceOpenedAt?.toIso8601String(),
     'replyToMessageId': replyToMessageId,
+    'replyToSenderId': replyToSenderId,
+    'replyToBody': replyToBody,
+    'replyToAttachmentType': replyToAttachmentType,
     'isForwarded': isForwarded,
   };
 
@@ -247,6 +266,9 @@ class Message extends Equatable {
         ? DateTime.parse(json['viewOnceOpenedAt'] as String)
         : null,
     replyToMessageId: json['replyToMessageId'] as String?,
+    replyToSenderId: json['replyToSenderId'] as String?,
+    replyToBody: json['replyToBody'] as String?,
+    replyToAttachmentType: json['replyToAttachmentType'] as String?,
     isForwarded:
         json['isForwarded'] as bool? ??
         json['is_forwarded'] as bool? ??
@@ -297,6 +319,9 @@ class Message extends Equatable {
     isViewOnce,
     viewOnceOpenedAt,
     replyToMessageId,
+    replyToSenderId,
+    replyToBody,
+    replyToAttachmentType,
     isForwarded,
   ];
 }

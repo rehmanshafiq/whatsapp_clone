@@ -499,6 +499,12 @@ class ChatRemoteDataSource {
         _asDateTime(json['viewOnceOpenedAt']);
     final replyToMessageId =
         _asString(json['reply_to_message_id']) ?? _asString(json['replyToMessageId']);
+    final replyToSenderId =
+        _asString(json['reply_to_sender_id']) ?? _asString(json['replyToSenderId']);
+    final replyToBody =
+        _asString(json['reply_to_body']) ?? _asString(json['replyToBody']);
+    final replyToAttachmentType = _asString(json['reply_to_attachment_type']) ??
+        _asString(json['replyToAttachmentType']);
     final isForwarded =
         json['is_forwarded'] == true || json['isForwarded'] == true;
     return Message(
@@ -517,6 +523,9 @@ class ChatRemoteDataSource {
       isViewOnce: isViewOnce,
       viewOnceOpenedAt: viewOnceOpenedAt,
       replyToMessageId: replyToMessageId,
+      replyToSenderId: replyToSenderId,
+      replyToBody: replyToBody,
+      replyToAttachmentType: replyToAttachmentType,
       isForwarded: isForwarded,
       reactions: _parseReactionsFromApi(json),
     );
