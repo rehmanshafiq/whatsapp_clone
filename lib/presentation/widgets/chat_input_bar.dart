@@ -8,8 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
+import '../cubit/chat_cubit.dart';
 import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
@@ -67,6 +70,23 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     _tabController = TabController(length: 3, vsync: this);
     _controller.addListener(_onTextChanged);
     _initVoiceDir();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final wasReplying = oldWidget.replyingTo != null;
+    final isReplying = widget.replyingTo != null;
+    if (!wasReplying && isReplying) {
+      if (_isEmojiVisible) {
+        setState(() => _isEmojiVisible = false);
+      }
+      // Ensure keyboard opens when user taps "Reply".
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _textFocusNode.requestFocus();
+      });
+    }
   }
 
   void _onTextChanged() {
@@ -272,7 +292,15 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   Widget _buildReplyPreview(Message replyingTo) {
-    final replySender = replyingTo.isOutgoing ? 'You' : replyingTo.senderId;
+    final cubit = context.read<ChatCubit>();
+    final myBackendId = cubit.repository.getCurrentUserId();
+    final sid = replyingTo.senderId;
+    final isMe = replyingTo.isOutgoing ||
+        sid == AppConstants.currentUserId ||
+        (myBackendId != null && myBackendId.isNotEmpty && sid == myBackendId);
+    final replySender = isMe
+        ? 'You'
+        : (cubit.state.selectedChannel?.name ?? sid);
     String replyText = replyingTo.text.trim();
     if (replyText.isEmpty) {
       if (replyingTo.isImage) {

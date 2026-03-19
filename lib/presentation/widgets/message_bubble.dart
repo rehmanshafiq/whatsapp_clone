@@ -416,11 +416,11 @@ Future<void> _handleMenuTap(
 ) async {
   final cubit = context.read<ChatCubit>();
   final action = item.label.trim().toLowerCase();
-  if (action == 'reply') {
+  if (action == 'reply' || action.contains('reply')) {
     cubit.startReplyTo(message);
     return;
   }
-  if (action == 'copy') {
+  if (action == 'copy' || action.contains('copy')) {
     await cubit.copyMessageToClipboard(message);
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
@@ -428,7 +428,7 @@ Future<void> _handleMenuTap(
     );
     return;
   }
-  if (action == 'delete') {
+  if (action == 'delete' || action.contains('delete')) {
     if (!message.isOutgoing) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('You can only delete your own messages')),
@@ -442,7 +442,7 @@ Future<void> _handleMenuTap(
     );
     return;
   }
-  if (action == 'forward') {
+  if (action == 'forward' || action.contains('forward')) {
     final channelIds = await _showForwardPicker(context, message.channelId);
     if (channelIds.isEmpty) return;
     await cubit.forwardMessageToChannels(message, channelIds);
@@ -1027,9 +1027,18 @@ class _ReplyPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final name = (senderId != null && senderId!.isNotEmpty)
-        ? senderId!
-        : (isOutgoing ? 'You' : 'Unknown');
+    final cubit = context.read<ChatCubit>();
+    final myBackendId = cubit.repository.getCurrentUserId();
+    final isMe = senderId == AppConstants.currentUserId ||
+        (myBackendId != null && myBackendId.isNotEmpty && senderId == myBackendId);
+    final String name;
+    if (isMe) {
+      name = 'You';
+    } else if (senderId == null || senderId!.isEmpty) {
+      name = isOutgoing ? 'You' : (cubit.state.selectedChannel?.name ?? 'Unknown');
+    } else {
+      name = cubit.state.selectedChannel?.name ?? senderId!;
+    }
     String text = (previewText ?? '').trim();
     final type = (attachmentType ?? '').toLowerCase();
     if (text.isEmpty) {
