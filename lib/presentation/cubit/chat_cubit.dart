@@ -590,16 +590,34 @@ class ChatCubit extends Cubit<ChatState> {
     final String resolvedPayloadText;
     if (text.isNotEmpty) {
       resolvedPayloadText = text;
-    } else if (messageTypeStr == 'image') {
-      resolvedPayloadText = '\u{1F4F7} Photo';
-    } else if (messageTypeStr == 'audio') {
-      resolvedPayloadText = '\u{1F3A4} Voice message';
-    } else if (messageTypeStr == 'video') {
-      resolvedPayloadText = '\u{1F3A5} Video';
-    } else if (messageTypeStr.isNotEmpty) {
-      resolvedPayloadText = '\u{1F4DD} Message';
     } else {
-      resolvedPayloadText = '';
+      switch (messageTypeStr) {
+        case 'image':
+          resolvedPayloadText = '\u{1F4F7} Photo';
+          break;
+        case 'audio':
+        case 'voice':
+          resolvedPayloadText = '\u{1F3A4} Voice message';
+          break;
+        case 'video':
+          resolvedPayloadText = '\u{1F3A5} Video';
+          break;
+        case 'document':
+          resolvedPayloadText = '\u{1F4C4} Document';
+          break;
+        case 'gif':
+          resolvedPayloadText = 'GIF';
+          break;
+        case 'sticker':
+          resolvedPayloadText = 'Sticker';
+          break;
+        case 'location':
+          resolvedPayloadText = '\u{1F4CD} Location';
+          break;
+        default:
+          resolvedPayloadText =
+              messageTypeStr.isNotEmpty ? '\u{1F4DD} Message' : '';
+      }
     }
 
     final displayText = resolvedPayloadText.isNotEmpty ? resolvedPayloadText : current.lastMessage;
