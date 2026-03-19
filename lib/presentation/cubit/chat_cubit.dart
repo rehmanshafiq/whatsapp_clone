@@ -546,7 +546,13 @@ class ChatCubit extends Cubit<ChatState> {
       _repository.incrementUnread(conversationId);
     }
 
-    final messageTypeStr = _stringFrom(data['type']);
+    // Socket may send type in "type" or "attachment_type" (e.g. web app sends attachment_type).
+    final messageTypeStr = _stringFrom(data['type']) ??
+        _stringFrom(data['attachment_type'])?.toLowerCase() ??
+        '';
+    final attachmentUrlRaw = _stringFrom(data['attachment_url']) ??
+        _stringFrom(data['mediaUrl']) ??
+        '';
     final String resolvedPayloadText;
     if (text.isNotEmpty) {
       resolvedPayloadText = text;
@@ -556,7 +562,7 @@ class ChatCubit extends Cubit<ChatState> {
       resolvedPayloadText = '\u{1F3A4} Voice message';
     } else if (messageTypeStr == 'video') {
       resolvedPayloadText = '\u{1F3A5} Video';
-    } else if (messageTypeStr != null && messageTypeStr.isNotEmpty) {
+    } else if (messageTypeStr.isNotEmpty) {
       resolvedPayloadText = '\u{1F4DD} Message';
     } else {
       resolvedPayloadText = '';
@@ -605,6 +611,47 @@ class ChatCubit extends Cubit<ChatState> {
           ? resolvedPayloadText
           : '\u{1F4DD} Message';
 
+      // Resolve message type and media URL from socket payload (e.g. web app sends attachment_type + attachment_url).
+      MessageType resolvedType = MessageType.text;
+      if (attachmentUrlRaw.isNotEmpty || messageTypeStr.isNotEmpty) {
+        switch (messageTypeStr) {
+          case 'image':
+            resolvedType = MessageType.image;
+            break;
+          case 'video':
+            resolvedType = MessageType.video;
+            break;
+          case 'audio':
+          case 'voice':
+            resolvedType = MessageType.audio;
+            break;
+          case 'gif':
+            resolvedType = MessageType.gif;
+            break;
+          case 'sticker':
+            resolvedType = MessageType.sticker;
+            break;
+          case 'document':
+            resolvedType = MessageType.document;
+            break;
+          case 'location':
+            resolvedType = MessageType.location;
+            break;
+          default:
+            if (attachmentUrlRaw.isNotEmpty) resolvedType = MessageType.image;
+        }
+      }
+      final String? resolvedMediaUrl;
+      if (attachmentUrlRaw.isEmpty) {
+        resolvedMediaUrl = null;
+      } else if (attachmentUrlRaw.startsWith('http')) {
+        resolvedMediaUrl = attachmentUrlRaw;
+      } else if (attachmentUrlRaw.startsWith('/uploads/')) {
+        resolvedMediaUrl = '${AppConstants.apiBaseUrl}$attachmentUrlRaw';
+      } else {
+        resolvedMediaUrl = attachmentUrlRaw;
+      }
+
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
@@ -615,6 +662,8 @@ class ChatCubit extends Cubit<ChatState> {
         text: messageTextForList,
         timestamp: timestamp,
         status: MessageStatus.sent,
+        type: resolvedType,
+        mediaUrl: resolvedMediaUrl,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);
