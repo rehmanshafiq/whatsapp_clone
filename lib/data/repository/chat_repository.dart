@@ -274,6 +274,18 @@ class ChatRepository {
     Duration audioDuration,
   ) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: audioPath,
+        token: token,
+        type: 'audio',
+      );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_audio';
       final message = Message(
         id: clientMsgId,
@@ -284,6 +296,7 @@ class ChatRepository {
         status: MessageStatus.sending,
         type: MessageType.audio,
         audioPath: audioPath,
+        mediaUrl: mediaUrl,
         audioDuration: audioDuration,
       );
 
@@ -296,7 +309,7 @@ class ChatRepository {
           body: '',
           // Backend contract: "voice" for voice notes.
           attachmentType: 'voice',
-          attachmentUrl: audioPath,
+          attachmentUrl: mediaUrl,
         );
       }
 
@@ -358,6 +371,18 @@ class ChatRepository {
     String text = '',
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: imagePath,
+        token: token,
+        type: 'image',
+      );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_image';
       final message = Message(
         id: clientMsgId,
@@ -367,7 +392,7 @@ class ChatRepository {
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.image,
-        mediaUrl: imagePath,
+        mediaUrl: mediaUrl,
       );
 
       final peerUserId = _getPeerUserIdForChannel(channelId);
@@ -378,7 +403,7 @@ class ChatRepository {
           peerUserId: peerUserId,
           body: text,
           attachmentType: 'image',
-          attachmentUrl: imagePath,
+          attachmentUrl: mediaUrl,
         );
       }
 
@@ -399,15 +424,39 @@ class ChatRepository {
     String text = '',
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: videoPath,
+        token: token,
+        type: 'video',
+      );
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'video',
+          attachmentUrl: mediaUrl,
+        );
+      }
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_video',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: text,
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.video,
-        mediaUrl: videoPath,
+        mediaUrl: mediaUrl,
       );
 
       await _remoteDataSource.sendMessage(message);
@@ -504,6 +553,18 @@ class ChatRepository {
     required int fileSize,
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: filePath,
+        token: token,
+        type: 'document',
+      );
       final message = Message(
         id: 'msg_${DateTime.now().millisecondsSinceEpoch}_document',
         channelId: channelId,
@@ -512,7 +573,7 @@ class ChatRepository {
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.document,
-        mediaUrl: filePath,
+        mediaUrl: mediaUrl,
         documentFileName: fileName,
         documentFileSize: fileSize,
       );

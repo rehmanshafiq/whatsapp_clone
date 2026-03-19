@@ -1,4 +1,6 @@
 import 'dart:convert';
+import 'dart:io';
+
 import 'package:dio/dio.dart';
 
 import '../../core/constants/app_constants.dart';
@@ -505,6 +507,85 @@ class ChatRemoteDataSource {
         message: 'Failed to send message',
         statusCode: 500,
       );
+    }
+  }
+
+  /// Upload media file. Returns full URL for use in send_message.
+  /// POST /api/v1/upload/media
+  Future<String> uploadMedia({
+    required String filePath,
+    required String type,
+    required String token,
+  }) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw const ApiException(
+          message: 'File not found',
+          statusCode: 400,
+        );
+      }
+      final fileName = filePath.split(RegExp(r'[/\\]')).last;
+      if (fileName.isEmpty) {
+        throw const ApiException(
+          message: 'Invalid file path',
+          statusCode: 400,
+        );
+      }
+
+      final formData = FormData.fromMap({
+        'file': await MultipartFile.fromFile(filePath, filename: fileName),
+      });
+
+      // Backend expects type as query param: /api/v1/upload/media?type=image
+      final response = await _dio.post<dynamic>(
+        '/api/v1/upload/media',
+        data: formData,
+        queryParameters: <String, dynamic>{'type': type},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is! Map<String, dynamic>) {
+        throw const ApiException(
+          message: 'Invalid upload response from server.',
+          statusCode: 500,
+        );
+      }
+
+      final url = _asString(data['url']);
+      if (url == null || url.isEmpty) {
+        throw const ApiException(
+          message: 'Upload response missing url.',
+          statusCode: 500,
+        );
+      }
+
+      // Prepend base URL if the response URL is relative
+      final baseUrl = AppConstants.apiBaseUrl.replaceAll(RegExp(r'/$'), '');
+      final path = url.startsWith('/') ? url : '/$url';
+      return '$baseUrl$path';
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to upload media.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
     }
   }
 

@@ -9,6 +9,7 @@ import 'package:video_player/video_player.dart';
 import 'dart:io';
 
 import '../../core/theme/app_theme.dart';
+import '../../core/constants/app_constants.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'audio_message_bubble.dart';
@@ -22,6 +23,15 @@ String _messageDisplayText(String body) =>
 
 /// True when body indicates a deleted message (show in italic).
 bool _isDeletedMessage(String body) => body == 'message deleted';
+
+/// Backend may return server-relative media URLs like `/uploads/...`.
+/// UI components should treat those as network URLs, not local files.
+String? _resolveMediaUrl(String? url) {
+  if (url == null || url.isEmpty) return null;
+  if (url.startsWith('http')) return url;
+  if (url.startsWith('/')) return '${AppConstants.apiBaseUrl}$url';
+  return url;
+}
 
 class MessageBubble extends StatelessWidget {
   final Message message;
@@ -616,6 +626,7 @@ class _MediaMessageBubble extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final resolvedMediaUrl = _resolveMediaUrl(message.mediaUrl);
     final isOutgoing = message.isOutgoing;
     final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
     final hourRaw = message.timestamp.hour % 12;
@@ -658,9 +669,9 @@ class _MediaMessageBubble extends StatelessWidget {
             if (message.mediaUrl != null)
               ClipRRect(
                 borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-                child: message.mediaUrl!.startsWith('http')
+                child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
                     ? CachedNetworkImage(
-                        imageUrl: message.mediaUrl!,
+                        imageUrl: resolvedMediaUrl,
                         width: isSticker ? 120 : null,
                         height: isSticker ? 120 : null,
                         fit: isSticker ? BoxFit.contain : BoxFit.cover,
@@ -758,7 +769,7 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
   }
 
   Future<void> _initVideo() async {
-    final url = widget.message.mediaUrl;
+    final url = _resolveMediaUrl(widget.message.mediaUrl);
     if (url == null) return;
 
     try {
