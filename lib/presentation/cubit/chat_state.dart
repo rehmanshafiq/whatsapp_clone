@@ -9,6 +9,7 @@ class ChatState extends Equatable {
   final List<Message> messages;
   final ChatChannel? selectedChannel;
   final bool isTyping;
+  final bool isRecordingAudio;
   final bool isOnline;
   final bool isSending;
   final bool isLoading;
@@ -31,6 +32,7 @@ class ChatState extends Equatable {
     this.messages = const [],
     this.selectedChannel,
     this.isTyping = false,
+    this.isRecordingAudio = false,
     this.isOnline = false,
     this.isSending = false,
     this.isLoading = false,
@@ -50,6 +52,7 @@ class ChatState extends Equatable {
     List<Message>? messages,
     ChatChannel? selectedChannel,
     bool? isTyping,
+    bool? isRecordingAudio,
     bool? isOnline,
     bool? isSending,
     bool? isLoading,
@@ -73,6 +76,7 @@ class ChatState extends Equatable {
           ? null
           : (selectedChannel ?? this.selectedChannel),
       isTyping: isTyping ?? this.isTyping,
+      isRecordingAudio: isRecordingAudio ?? this.isRecordingAudio,
       isOnline: isOnline ?? this.isOnline,
       isSending: isSending ?? this.isSending,
       isLoading: isLoading ?? this.isLoading,
@@ -108,6 +112,7 @@ class ChatState extends Equatable {
     messages,
     selectedChannel,
     isTyping,
+    isRecordingAudio,
     isOnline,
     isSending,
     isLoading,

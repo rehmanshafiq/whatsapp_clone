@@ -1305,4 +1305,42 @@ class ChatRepository {
 
     _webSocketService.send(envelope);
   }
+
+  /// Sends recording_start when user starts recording a voice note.
+  void sendRecordingStart({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'recording_start',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends recording_stop when user stops/cancels/sends voice recording.
+  void sendRecordingStop({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'recording_stop',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
 }

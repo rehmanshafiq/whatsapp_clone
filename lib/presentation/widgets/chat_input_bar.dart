@@ -23,6 +23,10 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback? onTypingStart;
   /// Called when user stops typing (input cleared, message sent, or screen left).
   final VoidCallback? onTypingStop;
+  /// Called when user starts recording audio.
+  final VoidCallback? onRecordingStart;
+  /// Called when user stops/cancels/sends recording.
+  final VoidCallback? onRecordingStop;
 
   const ChatInputBar({
     super.key,
@@ -32,6 +36,8 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendMedia,
     this.onTypingStart,
     this.onTypingStop,
+    this.onRecordingStart,
+    this.onRecordingStop,
   });
 
   @override
@@ -115,6 +121,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   @override
   void dispose() {
     widget.onTypingStop?.call();
+    widget.onRecordingStop?.call();
     _typingThrottleTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _tabController.dispose();
@@ -165,6 +172,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   Future<void> _handleAudioSend(File soundFile, String time) async {
+    widget.onRecordingStop?.call();
     final duration = _parseRecordingTime(time);
     if (duration.inSeconds < 1) {
       try {
@@ -288,6 +296,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           SocialMediaRecorder(
             sendRequestFunction: (File soundFile, String time) {
               _handleAudioSend(soundFile, time);
+            },
+            startRecording: () {
+              widget.onTypingStop?.call();
+              widget.onRecordingStart?.call();
+            },
+            stopRecording: (_) {
+              widget.onRecordingStop?.call();
             },
             storeSoundRecoringPath: _voiceNoteDir,
             encode: AudioEncoderType.AAC,

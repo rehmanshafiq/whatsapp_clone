@@ -136,7 +136,14 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   Future<void> loadMessages(String channelId) async {
-    emit(state.copyWith(isLoading: true, clearError: true));
+    emit(
+      state.copyWith(
+        isLoading: true,
+        clearError: true,
+        isTyping: false,
+        isRecordingAudio: false,
+      ),
+    );
     try {
       final channel = _repository.getChannel(channelId);
       final page = await _repository.getMessages(channelId);
@@ -428,6 +435,14 @@ class ChatCubit extends Cubit<ChatState> {
     if (eventType == 'ping' || eventType == 'pong') return;
     if (eventType == 'typing_indicator' || eventType == 'typing_start' || eventType == 'typing_stop') {
       _handleTypingEvent(eventType!, raw);
+      return;
+    }
+    if (eventType == 'recording_start' || eventType == 'recording_stop') {
+      _handleRecordingEvent(eventType!, raw);
+      return;
+    }
+    if (eventType == 'recording_indicator') {
+      _handleRecordingIndicatorEvent(raw);
       return;
     }
     if (eventType == 'presence_update') {
@@ -758,6 +773,33 @@ class ChatCubit extends Cubit<ChatState> {
     if (conversationId == null || state.selectedChannel?.id != conversationId) return;
     final isTyping = eventType == 'typing_indicator' ? data['is_typing'] == true : eventType == 'typing_start';
     emit(state.copyWith(isTyping: isTyping));
+  }
+
+  void _handleRecordingEvent(String eventType, Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null || state.selectedChannel?.id != conversationId) return;
+    final isRecording = eventType == 'recording_start';
+    emit(state.copyWith(isRecordingAudio: isRecording));
+  }
+
+  void _handleRecordingIndicatorEvent(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null || state.selectedChannel?.id != conversationId) {
+      return;
+    }
+
+    final isRecordingRaw = data['is_recording'];
+    final isRecording =
+        isRecordingRaw == true || _stringFrom(isRecordingRaw) == 'true';
+    emit(state.copyWith(isRecordingAudio: isRecording));
   }
 
   void _handleMessageSentAck(Map<String, dynamic> raw) {
@@ -1599,6 +1641,34 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Sends recording_start when user starts recording voice note.
+  void sendRecordingStart(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendRecordingStart(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  /// Sends recording_stop when user stops/cancels/sends voice note.
+  void sendRecordingStop(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendRecordingStop(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
   void deleteChat(String channelId) {
     _repository.deleteChat(channelId);
     final updated = List.of(state.channels)
@@ -1619,6 +1689,7 @@ class ChatCubit extends Cubit<ChatState> {
       state.copyWith(
         clearSelectedChannel: true,
         isTyping: false,
+        isRecordingAudio: false,
         isOnline: false,
       ),
     );

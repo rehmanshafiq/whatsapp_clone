@@ -202,6 +202,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.isLoading != curr.isLoading ||
           prev.isPaginationLoading != curr.isPaginationLoading ||
           prev.isTyping != curr.isTyping ||
+          prev.isRecordingAudio != curr.isRecordingAudio ||
           prev.isOnline != curr.isOnline ||
           prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen ||
           prev.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline !=
@@ -302,7 +303,13 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (state.isTyping)
+                        if (state.isRecordingAudio)
+                          const Text(
+                            'recording audio...',
+                            style: TextStyle(
+                                color: AppColors.accent, fontSize: 12),
+                          )
+                        else if (state.isTyping)
                           const Text(
                             'typing...',
                             style: TextStyle(
@@ -413,6 +420,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           cubit.sendTypingStart(widget.channelId),
                       onTypingStop: () =>
                           cubit.sendTypingStop(widget.channelId),
+                      onRecordingStart: () =>
+                          cubit.sendRecordingStart(widget.channelId),
+                      onRecordingStop: () =>
+                          cubit.sendRecordingStop(widget.channelId),
                     ),
                   ],
                 ),
