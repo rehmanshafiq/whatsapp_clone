@@ -23,6 +23,9 @@ class ChatState extends Equatable {
   /// Profile of the currently authenticated user (used for AppBar avatar).
   final UserSearchResult? currentUserProfile;
 
+  /// View-once opened: messageId -> local file path (image fetched with auth).
+  final Map<String, String> viewOnceLocalPaths;
+
   const ChatState({
     this.channels = const [],
     this.messages = const [],
@@ -39,6 +42,7 @@ class ChatState extends Equatable {
     this.isUserSearchLoading = false,
     this.userSearchError,
     this.currentUserProfile,
+    this.viewOnceLocalPaths = const {},
   });
 
   ChatState copyWith({
@@ -60,6 +64,7 @@ class ChatState extends Equatable {
     String? userSearchError,
     bool clearUserSearchError = false,
     UserSearchResult? currentUserProfile,
+    Map<String, String>? viewOnceLocalPaths,
   }) {
     return ChatState(
       channels: channels ?? this.channels,
@@ -81,6 +86,7 @@ class ChatState extends Equatable {
           ? null
           : (userSearchError ?? this.userSearchError),
       currentUserProfile: currentUserProfile ?? this.currentUserProfile,
+      viewOnceLocalPaths: viewOnceLocalPaths ?? this.viewOnceLocalPaths,
     );
   }
 
@@ -113,5 +119,6 @@ class ChatState extends Equatable {
     isUserSearchLoading,
     userSearchError,
     currentUserProfile,
+    viewOnceLocalPaths,
   ];
 }

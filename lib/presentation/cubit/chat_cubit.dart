@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -22,6 +24,9 @@ class ChatCubit extends Cubit<ChatState> {
   final Map<String, List<Timer>> _statusTimers = {};
   final Map<String, Timer> _liveLocationTimers = {};
   StreamSubscription<dynamic>? _socketSubscription;
+
+  /// Auth headers for loading media from our API (Bearer + x-api-key).
+  Map<String, String>? get authHeadersForMedia => _repository.getAuthHeadersForMedia();
 
   ChatCubit(this._repository) : super(const ChatState()) {
     _socketSubscription = _repository.socketMessages.listen(
@@ -660,6 +665,16 @@ class ChatCubit extends Cubit<ChatState> {
           ? ''
           : messageTextForList;
 
+      final isViewOnce = data['is_view_once'] == true || data['isViewOnce'] == true;
+      final viewOnceOpenedAtRaw = data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
+      final DateTime? viewOnceOpenedAt = viewOnceOpenedAtRaw != null
+          ? (viewOnceOpenedAtRaw is String
+              ? DateTime.tryParse(viewOnceOpenedAtRaw)
+              : viewOnceOpenedAtRaw is int
+                  ? DateTime.fromMillisecondsSinceEpoch(viewOnceOpenedAtRaw, isUtc: true)
+                  : null)
+          : null;
+
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
@@ -672,6 +687,8 @@ class ChatCubit extends Cubit<ChatState> {
         status: MessageStatus.sent,
         type: resolvedType,
         mediaUrl: resolvedMediaUrl,
+        isViewOnce: isViewOnce,
+        viewOnceOpenedAt: viewOnceOpenedAt,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);
@@ -1069,6 +1086,7 @@ class ChatCubit extends Cubit<ChatState> {
     String channelId,
     String imagePath, {
     String text = '',
+    bool isViewOnce = false,
   }) async {
     emit(state.copyWith(isSending: true));
     try {
@@ -1076,6 +1094,7 @@ class ChatCubit extends Cubit<ChatState> {
         channelId,
         imagePath,
         text: text,
+        isViewOnce: isViewOnce,
       );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(state.copyWith(messages: updatedMessages, isSending: false));
@@ -1084,6 +1103,49 @@ class ChatCubit extends Cubit<ChatState> {
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  /// Opens a view-once image message. Fetches temporary URL (valid 60s), downloads
+  /// image with auth, saves to temp file, and updates the message so it displays.
+  Future<void> openViewOnceMessage(String messageId) async {
+    final messages = state.messages;
+    final idx = messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    final message = messages[idx];
+    if (!message.isImage || !message.isViewOnce || message.isOutgoing) return;
+    if (message.viewOnceOpenedAt != null) return; // Already opened
+
+    try {
+      final result = await _repository.openViewOnceMessage(messageId);
+      final attachmentUrl = result.attachmentUrl;
+      final resolvedUrl = attachmentUrl.startsWith('http')
+          ? attachmentUrl
+          : attachmentUrl.startsWith('/')
+              ? '${AppConstants.apiBaseUrl}$attachmentUrl'
+              : '${AppConstants.apiBaseUrl}/$attachmentUrl';
+
+      // Fetch image bytes with same auth as API so it loads reliably
+      final bytes = await _repository.fetchImageBytes(resolvedUrl);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/view_once_$messageId.jpg');
+      await file.writeAsBytes(bytes);
+      final localPath = file.path;
+
+      final updated = message.copyWith(
+        mediaUrl: resolvedUrl,
+        viewOnceOpenedAt: result.viewOnceOpenedAt,
+      );
+      _repository.addOrUpdateMessage(updated);
+      final updatedMessages = List<Message>.from(messages)..[idx] = updated;
+      final paths = Map<String, String>.from(state.viewOnceLocalPaths)
+        ..[messageId] = localPath;
+      emit(state.copyWith(
+        messages: updatedMessages,
+        viewOnceLocalPaths: paths,
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
     }
   }
 

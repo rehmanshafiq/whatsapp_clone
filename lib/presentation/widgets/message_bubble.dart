@@ -24,6 +24,12 @@ String _messageDisplayText(String body) =>
 /// True when body indicates a deleted message (show in italic).
 bool _isDeletedMessage(String body) => body == 'message deleted';
 
+/// View-once image is considered expired 60 seconds after opening.
+bool _isViewOnceExpired(DateTime? viewOnceOpenedAt) {
+  if (viewOnceOpenedAt == null) return false;
+  return viewOnceOpenedAt.add(const Duration(seconds: 60)).isBefore(DateTime.now());
+}
+
 /// Backend may return server-relative media URLs like `/uploads/...`.
 /// Only prepend baseUrl for those; leave local absolute paths (e.g. /data/... on Android) unchanged.
 String? _resolveMediaUrl(String? url) {
@@ -31,6 +37,152 @@ String? _resolveMediaUrl(String? url) {
   if (url.startsWith('http')) return url;
   if (url.startsWith('/uploads/')) return '${AppConstants.apiBaseUrl}$url';
   return url;
+}
+
+Widget _buildMediaContent(
+  BuildContext context, {
+  required Message message,
+  required String? resolvedMediaUrl,
+  required bool isSticker,
+  required bool isOutgoing,
+}) {
+  const double placeholderSize = 200;
+  const double stickerSize = 120;
+
+  // View-once: recipient not opened -> tap to view placeholder
+  if (message.isViewOnce &&
+      !isOutgoing &&
+      message.viewOnceOpenedAt == null) {
+    return GestureDetector(
+      onTap: () => context.read<ChatCubit>().openViewOnceMessage(message.id),
+      child: Container(
+        width: isSticker ? stickerSize : placeholderSize,
+        height: isSticker ? stickerSize : placeholderSize,
+        decoration: BoxDecoration(
+          color: AppColors.appBar,
+          borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+        ),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.visibility,
+              color: AppColors.textSecondary,
+              size: 40,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'Tap to view',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+            Text(
+              'View once photo',
+              style: TextStyle(
+                color: AppColors.textSecondary.withValues(alpha: 0.7),
+                fontSize: 11,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // View-once: recipient opened, not expired, and we have local file (fetched with auth)
+  final viewOnceLocalPath = message.isViewOnce &&
+          !isOutgoing &&
+          message.viewOnceOpenedAt != null &&
+          !_isViewOnceExpired(message.viewOnceOpenedAt)
+      ? context.read<ChatCubit>().state.viewOnceLocalPaths[message.id]
+      : null;
+  if (viewOnceLocalPath != null) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+      child: Image.file(
+        File(viewOnceLocalPath),
+        width: isSticker ? stickerSize : null,
+        height: isSticker ? stickerSize : null,
+        fit: isSticker ? BoxFit.contain : BoxFit.cover,
+      ),
+    );
+  }
+
+  // View-once: recipient opened but expired
+  if (message.isViewOnce &&
+      !isOutgoing &&
+      message.viewOnceOpenedAt != null &&
+      _isViewOnceExpired(message.viewOnceOpenedAt)) {
+    return Container(
+      width: isSticker ? stickerSize : placeholderSize,
+      height: isSticker ? stickerSize : placeholderSize,
+      decoration: BoxDecoration(
+        color: AppColors.appBar,
+        borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+      ),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.visibility_off, color: AppColors.textSecondary, size: 36),
+          const SizedBox(height: 8),
+          Text(
+            'This photo is no longer available',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 12,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Show image (view-once sender, or opened recipient within 60s, or normal image)
+  if (message.mediaUrl != null) {
+    final isOurApiUrl = resolvedMediaUrl != null &&
+        resolvedMediaUrl.startsWith('http') &&
+        resolvedMediaUrl.contains(AppConstants.apiBaseUrl);
+    final httpHeaders = isOurApiUrl
+        ? context.read<ChatCubit>().authHeadersForMedia
+        : null;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+      child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
+          ? CachedNetworkImage(
+              imageUrl: resolvedMediaUrl,
+              httpHeaders: httpHeaders,
+              width: isSticker ? stickerSize : null,
+              height: isSticker ? stickerSize : null,
+              fit: isSticker ? BoxFit.contain : BoxFit.cover,
+              placeholder: (context, url) => Container(
+                width: isSticker ? stickerSize : placeholderSize,
+                height: isSticker ? stickerSize : placeholderSize,
+                color: AppColors.chatBackground,
+                child: const Center(
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+              errorWidget: (context, url, error) => Container(
+                width: isSticker ? stickerSize : placeholderSize,
+                height: isSticker ? stickerSize : placeholderSize,
+                color: AppColors.chatBackground,
+                child: const Center(child: Icon(Icons.error_outline)),
+              ),
+            )
+          : Image.file(
+              File(message.mediaUrl!),
+              width: isSticker ? stickerSize : null,
+              height: isSticker ? stickerSize : null,
+              fit: isSticker ? BoxFit.contain : BoxFit.cover,
+            ),
+    );
+  }
+
+  return const SizedBox.shrink();
 }
 
 class MessageBubble extends StatelessWidget {
@@ -666,37 +818,13 @@ class _MediaMessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (message.mediaUrl != null)
-              ClipRRect(
-                borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-                child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
-                    ? CachedNetworkImage(
-                        imageUrl: resolvedMediaUrl,
-                        width: isSticker ? 120 : null,
-                        height: isSticker ? 120 : null,
-                        fit: isSticker ? BoxFit.contain : BoxFit.cover,
-                        placeholder: (context, url) => Container(
-                          width: isSticker ? 120 : 200,
-                          height: isSticker ? 120 : 200,
-                          color: AppColors.chatBackground,
-                          child: const Center(
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          ),
-                        ),
-                        errorWidget: (context, url, error) => Container(
-                          width: isSticker ? 120 : 200,
-                          height: isSticker ? 120 : 200,
-                          color: AppColors.chatBackground,
-                          child: const Center(child: Icon(Icons.error_outline)),
-                        ),
-                      )
-                    : Image.file(
-                        File(message.mediaUrl!),
-                        width: isSticker ? 120 : null,
-                        height: isSticker ? 120 : null,
-                        fit: isSticker ? BoxFit.contain : BoxFit.cover,
-                      ),
-              ),
+            _buildMediaContent(
+              context,
+              message: message,
+              resolvedMediaUrl: resolvedMediaUrl,
+              isSticker: isSticker,
+              isOutgoing: isOutgoing,
+            ),
             if (!isSticker &&
                 message.text.isNotEmpty &&
                 message.text != 'Photo' &&

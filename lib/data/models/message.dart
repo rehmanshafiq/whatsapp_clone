@@ -40,6 +40,10 @@ class Message extends Equatable {
   final bool isEdited;
   /// When the message was last edited (from API edited_at).
   final DateTime? editedAt;
+  /// View-once image: recipient can open once; URL valid 60 seconds.
+  final bool isViewOnce;
+  /// When the view-once message was opened (from API view_once_opened_at).
+  final DateTime? viewOnceOpenedAt;
 
   const Message({
     required this.id,
@@ -71,6 +75,8 @@ class Message extends Equatable {
     this.readAt,
     this.isEdited = false,
     this.editedAt,
+    this.isViewOnce = false,
+    this.viewOnceOpenedAt,
   });
 
   Message copyWith({
@@ -103,6 +109,8 @@ class Message extends Equatable {
     DateTime? readAt,
     bool? isEdited,
     DateTime? editedAt,
+    bool? isViewOnce,
+    DateTime? viewOnceOpenedAt,
   }) {
     return Message(
       id: id ?? this.id,
@@ -135,6 +143,8 @@ class Message extends Equatable {
       readAt: readAt ?? this.readAt,
       isEdited: isEdited ?? this.isEdited,
       editedAt: editedAt ?? this.editedAt,
+      isViewOnce: isViewOnce ?? this.isViewOnce,
+      viewOnceOpenedAt: viewOnceOpenedAt ?? this.viewOnceOpenedAt,
     );
   }
 
@@ -168,6 +178,8 @@ class Message extends Equatable {
     'readAt': readAt?.toIso8601String(),
     'isEdited': isEdited,
     'editedAt': editedAt?.toIso8601String(),
+    'isViewOnce': isViewOnce,
+    'viewOnceOpenedAt': viewOnceOpenedAt?.toIso8601String(),
   };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -218,6 +230,10 @@ class Message extends Equatable {
     editedAt: json['editedAt'] != null
         ? DateTime.parse(json['editedAt'] as String)
         : null,
+    isViewOnce: json['isViewOnce'] as bool? ?? false,
+    viewOnceOpenedAt: json['viewOnceOpenedAt'] != null
+        ? DateTime.parse(json['viewOnceOpenedAt'] as String)
+        : null,
   );
 
   bool get isOutgoing => senderId == 'me';
@@ -261,5 +277,7 @@ class Message extends Equatable {
     readAt,
     isEdited,
     editedAt,
+    isViewOnce,
+    viewOnceOpenedAt,
   ];
 }

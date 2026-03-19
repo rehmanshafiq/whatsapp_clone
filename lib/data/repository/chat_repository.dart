@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
@@ -13,6 +13,7 @@ import '../services/web_socket_service.dart';
 import 'chat_remote_data_source.dart';
 
 export '../models/message.dart' show MessageType;
+export 'chat_remote_data_source.dart' show ViewOnceOpenResult;
 
 class ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
@@ -32,6 +33,29 @@ class ChatRepository {
   /// Current user's id from backend (stored at login). Used to normalize
   /// message senderId so UI can show sent (right) vs received (left).
   String? getCurrentUserId() => _storageService.getUserId();
+
+  /// Headers for loading media from our API (Bearer + x-api-key). Used by
+  /// CachedNetworkImage so /uploads/... requests succeed.
+  Map<String, String>? getAuthHeadersForMedia() {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) return null;
+    return <String, String>{
+      'Authorization': 'Bearer $token',
+      'x-api-key': AppConstants.apiKey,
+    };
+  }
+
+  /// Fetches image bytes with auth (for view-once so image loads reliably).
+  Future<Uint8List> fetchImageBytes(String url) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.fetchImageBytes(url: url, token: token);
+  }
 
   UserSearchResult? get currentUserProfile => _cachedCurrentUserProfile;
 
@@ -369,6 +393,7 @@ class ChatRepository {
     String channelId,
     String imagePath, {
     String text = '',
+    bool isViewOnce = false,
   }) async {
     try {
       final token = _storageService.getToken();
@@ -393,6 +418,7 @@ class ChatRepository {
         status: MessageStatus.sending,
         type: MessageType.image,
         mediaUrl: mediaUrl,
+        isViewOnce: isViewOnce,
       );
 
       final peerUserId = _getPeerUserIdForChannel(channelId);
@@ -404,6 +430,7 @@ class ChatRepository {
           body: text,
           attachmentType: 'image',
           attachmentUrl: mediaUrl,
+          isViewOnce: isViewOnce,
         );
       }
 
@@ -1077,6 +1104,21 @@ class ChatRepository {
     }
   }
 
+  /// Opens a view-once message. Returns temporary image URL (valid 60 seconds).
+  Future<ViewOnceOpenResult> openViewOnceMessage(String messageId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.openViewOnceMessage(
+      messageId: messageId,
+      token: token,
+    );
+  }
+
   void _sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
@@ -1084,6 +1126,7 @@ class ChatRepository {
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
+    bool isViewOnce = false,
   }) {
     if (!_webSocketService.isConnected) return;
 
@@ -1097,6 +1140,7 @@ class ChatRepository {
         'body': body,
         'attachment_type': attachmentType,
         'attachment_url': attachmentUrl,
+        'is_view_once': isViewOnce,
       },
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };

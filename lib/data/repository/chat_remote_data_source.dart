@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
 
@@ -24,6 +25,17 @@ class MessagesPage {
   });
 
   static const MessagesPage empty = MessagesPage(messages: [], hasMore: false);
+}
+
+/// Result of opening a view-once message (URL valid 60 seconds).
+class ViewOnceOpenResult {
+  final String attachmentUrl;
+  final DateTime viewOnceOpenedAt;
+
+  const ViewOnceOpenResult({
+    required this.attachmentUrl,
+    required this.viewOnceOpenedAt,
+  });
 }
 
 class ChatRemoteDataSource {
@@ -482,6 +494,9 @@ class ChatRemoteDataSource {
         : null;
     final deliveredAt = _asDateTime(json['delivered_at']) ?? _asDateTime(json['deliveredAt']);
     final readAt = _asDateTime(json['read_at']) ?? _asDateTime(json['readAt']);
+    final isViewOnce = json['is_view_once'] == true || json['isViewOnce'] == true;
+    final viewOnceOpenedAt = _asDateTime(json['view_once_opened_at']) ??
+        _asDateTime(json['viewOnceOpenedAt']);
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
@@ -495,7 +510,86 @@ class ChatRemoteDataSource {
       readAt: readAt,
       isEdited: isEdited,
       editedAt: editedAtValid,
+      isViewOnce: isViewOnce,
+      viewOnceOpenedAt: viewOnceOpenedAt,
     );
+  }
+
+  /// Open a view-once message. Returns temporary attachment_url (valid 60 seconds).
+  /// POST /api/v1/chat/messages/{message_id}/view-once-open
+  Future<ViewOnceOpenResult> openViewOnceMessage({
+    required String messageId,
+    required String token,
+  }) async {
+    try {
+      final response = await _dio.post<dynamic>(
+        '/api/v1/chat/messages/$messageId/view-once-open',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is! Map<String, dynamic>) {
+        throw const ApiException(
+          message: 'Invalid view-once-open response.',
+          statusCode: 500,
+        );
+      }
+      final attachmentUrl = _asString(data['attachment_url']) ?? '';
+      final openedAtStr = _asString(data['view_once_opened_at']);
+      final viewOnceOpenedAt = openedAtStr != null && openedAtStr.isNotEmpty
+          ? DateTime.tryParse(openedAtStr)
+          : DateTime.now();
+      if (attachmentUrl.isEmpty) {
+        throw const ApiException(
+          message: 'View-once open response missing attachment_url.',
+          statusCode: 500,
+        );
+      }
+      return ViewOnceOpenResult(
+        attachmentUrl: attachmentUrl,
+        viewOnceOpenedAt: viewOnceOpenedAt ?? DateTime.now(),
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to open view-once message.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (statusCode == 404) {
+        message = 'Message not found or already opened.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Fetches image bytes with auth (for view-once and other protected media).
+  Future<Uint8List> fetchImageBytes({
+    required String url,
+    required String token,
+  }) async {
+    final fullUrl = url.startsWith('http') ? url : '${AppConstants.apiBaseUrl}$url';
+    final response = await _dio.get<dynamic>(
+      fullUrl,
+      options: Options(
+        responseType: ResponseType.bytes,
+        headers: <String, String>{
+          'authorization': 'Bearer $token',
+          'x-api-key': _apiKey,
+        },
+      ),
+    );
+    final data = response.data;
+    if (data == null) throw const ApiException(message: 'Empty image response', statusCode: 500);
+    if (data is! Uint8List) throw const ApiException(message: 'Invalid image response', statusCode: 500);
+    return data;
   }
 
   Future<Message> sendMessage(Message message) async {
