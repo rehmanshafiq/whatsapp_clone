@@ -1,8 +1,10 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:open_file/open_file.dart';
 
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
 import 'document_list_item.dart' show formatFileSize;
@@ -162,6 +164,24 @@ class DocumentMessageBubble extends StatelessWidget {
       }
       return;
     }
+
+    // For server-relative or absolute URLs, open via browser / external app.
+    // Only treat /uploads/... as server path; local paths like /data/... stay as file.
+    final isRemote = path.startsWith('http') || path.startsWith('/uploads/');
+    if (isRemote) {
+      final url = path.startsWith('http')
+          ? path
+          : '${AppConstants.apiBaseUrl}$path';
+      final uri = Uri.parse(url);
+      if (context.mounted) {
+        await launchUrl(
+          uri,
+          mode: LaunchMode.externalApplication,
+        );
+      }
+      return;
+    }
+
     final file = File(path);
     if (!file.existsSync()) {
       if (context.mounted) {

@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:geolocator/geolocator.dart';
@@ -22,6 +25,9 @@ class ChatCubit extends Cubit<ChatState> {
   final Map<String, List<Timer>> _statusTimers = {};
   final Map<String, Timer> _liveLocationTimers = {};
   StreamSubscription<dynamic>? _socketSubscription;
+
+  /// Auth headers for loading media from our API (Bearer + x-api-key).
+  Map<String, String>? get authHeadersForMedia => _repository.getAuthHeadersForMedia();
 
   ChatCubit(this._repository) : super(const ChatState()) {
     _socketSubscription = _repository.socketMessages.listen(
@@ -131,7 +137,14 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   Future<void> loadMessages(String channelId) async {
-    emit(state.copyWith(isLoading: true, clearError: true));
+    emit(
+      state.copyWith(
+        isLoading: true,
+        clearError: true,
+        isTyping: false,
+        isRecordingAudio: false,
+      ),
+    );
     try {
       final channel = _repository.getChannel(channelId);
       final page = await _repository.getMessages(channelId);
@@ -283,20 +296,183 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
-  Future<void> sendMessage(String channelId, String text) async {
+  /// Clears all messages for [conversationId] via API, updates local state.
+  Future<void> clearChat(String conversationId) async {
+    try {
+      await _repository.clearChatMessages(conversationId);
+      if (isClosed) return;
+      final channels = state.channels
+          .map((c) => c.id == conversationId ? c.copyWith(lastMessage: '') : c)
+          .toList();
+      // If this conversation is currently open, clear messages too.
+      final isOpen = state.selectedChannel?.id == conversationId;
+      emit(state.copyWith(
+        channels: channels,
+        messages: isOpen ? const <Message>[] : null,
+      ));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Deletes a conversation via API and removes it from local state.
+  Future<void> deleteConversation(String conversationId) async {
+    try {
+      await _repository.deleteConversationRemote(conversationId);
+      if (isClosed) return;
+      final channels =
+          state.channels.where((c) => c.id != conversationId).toList();
+      emit(state.copyWith(channels: channels));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Toggles mute on a conversation via API and updates local state.
+  Future<void> toggleMute(String conversationId) async {
+    try {
+      final isMuted = await _repository.toggleMuteConversation(conversationId);
+      if (isClosed) return;
+      final channels = state.channels
+          .map(
+              (c) => c.id == conversationId ? c.copyWith(isMuted: isMuted) : c)
+          .toList();
+      emit(state.copyWith(channels: channels));
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> blockUser(String userId) async {
+    try {
+      await _repository.blockUser(userId);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> unblockUser(String userId) async {
+    try {
+      await _repository.unblockUser(userId);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<UserSearchResult>> getBlockedUsers() async {
+    try {
+      return await _repository.getBlockedUsers();
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> sendMessage(
+    String channelId,
+    String text, {
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) async {
     if (text.trim().isEmpty) return;
 
     emit(state.copyWith(isSending: true));
     try {
-      final message = await _repository.sendMessage(channelId, text.trim());
+      final effectiveReplyTo = replyToMessageId.isNotEmpty
+          ? replyToMessageId
+          : state.replyingTo?.id ?? '';
+      final message = await _repository.sendMessage(
+        channelId,
+        text.trim(),
+        replyToMessageId: effectiveReplyTo,
+        isForwarded: isForwarded,
+      );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+      emit(
+        state.copyWith(
+          messages: updatedMessages,
+          isSending: false,
+          clearReplyingTo: true,
+        ),
+      );
 
       _simulateMessageLifecycle(message);
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
+  }
+
+  void startReplyTo(Message message) {
+    if (isClosed) return;
+    emit(state.copyWith(replyingTo: message));
+  }
+
+  void clearReply() {
+    if (isClosed) return;
+    emit(state.copyWith(clearReplyingTo: true));
+  }
+
+  Future<void> copyMessageToClipboard(Message message) async {
+    String text = message.text.trim();
+    if (text.isEmpty) {
+      if (message.isImage) {
+        text = 'Photo';
+      } else if (message.isVideo) {
+        text = 'Video';
+      } else if (message.isAudio) {
+        text = 'Voice message';
+      } else if (message.isDocument) {
+        text = message.documentFileName?.trim().isNotEmpty == true
+            ? message.documentFileName!
+            : 'Document';
+      } else if (message.isLocation) {
+        text = message.locationAddress?.trim().isNotEmpty == true
+            ? message.locationAddress!
+            : 'Location';
+      } else if (message.isGif) {
+        text = 'GIF';
+      } else if (message.isSticker) {
+        text = 'Sticker';
+      }
+    }
+    if (text.isEmpty) return;
+    await Clipboard.setData(ClipboardData(text: text));
+  }
+
+  Future<void> forwardMessageToChannels(
+    Message sourceMessage,
+    List<String> channelIds,
+  ) async {
+    if (channelIds.isEmpty) return;
+    for (final channelId in channelIds) {
+      try {
+        final forwarded = await _repository.forwardMessageToChannel(
+          channelId: channelId,
+          source: sourceMessage,
+        );
+        if (state.selectedChannel?.id == channelId) {
+          final updatedMessages = List<Message>.from(state.messages)
+            ..add(forwarded);
+          emit(state.copyWith(messages: updatedMessages));
+          _simulateMessageLifecycle(forwarded);
+        }
+      } catch (_) {
+        // Continue forwarding to remaining selected chats.
+      }
+    }
+    _refreshChannelList();
   }
 
   void _handleSocketMessage(dynamic event) {
@@ -332,8 +508,20 @@ class ChatCubit extends Cubit<ChatState> {
       _handleTypingEvent(eventType!, raw);
       return;
     }
+    if (eventType == 'recording_start' || eventType == 'recording_stop') {
+      _handleRecordingEvent(eventType!, raw);
+      return;
+    }
+    if (eventType == 'recording_indicator') {
+      _handleRecordingIndicatorEvent(raw);
+      return;
+    }
     if (eventType == 'presence_update') {
       _handlePresenceUpdate(raw);
+      return;
+    }
+    if (eventType == 'block_status') {
+      _handleBlockStatus(raw);
       return;
     }
     if (eventType == 'message_sent_ack') {
@@ -354,6 +542,10 @@ class ChatCubit extends Cubit<ChatState> {
     }
     if (eventType == 'conversation_upserted') {
       _handleConversationUpserted(raw);
+      return;
+    }
+    if (eventType == 'message_reaction') {
+      _handleMessageReaction(raw);
       return;
     }
 
@@ -459,20 +651,44 @@ class ChatCubit extends Cubit<ChatState> {
       _repository.incrementUnread(conversationId);
     }
 
-    final messageTypeStr = _stringFrom(data['type']);
+    // Socket may send type in "type" or "attachment_type" (e.g. web app sends attachment_type).
+    final messageTypeStr = _stringFrom(data['type']) ??
+        _stringFrom(data['attachment_type'])?.toLowerCase() ??
+        '';
+    final attachmentUrlRaw = _stringFrom(data['attachment_url']) ??
+        _stringFrom(data['mediaUrl']) ??
+        '';
     final String resolvedPayloadText;
     if (text.isNotEmpty) {
       resolvedPayloadText = text;
-    } else if (messageTypeStr == 'image') {
-      resolvedPayloadText = '\u{1F4F7} Photo';
-    } else if (messageTypeStr == 'audio') {
-      resolvedPayloadText = '\u{1F3A4} Voice message';
-    } else if (messageTypeStr == 'video') {
-      resolvedPayloadText = '\u{1F3A5} Video';
-    } else if (messageTypeStr != null && messageTypeStr.isNotEmpty) {
-      resolvedPayloadText = '\u{1F4DD} Message';
     } else {
-      resolvedPayloadText = '';
+      switch (messageTypeStr) {
+        case 'image':
+          resolvedPayloadText = '\u{1F4F7} Photo';
+          break;
+        case 'audio':
+        case 'voice':
+          resolvedPayloadText = '\u{1F3A4} Voice message';
+          break;
+        case 'video':
+          resolvedPayloadText = '\u{1F3A5} Video';
+          break;
+        case 'document':
+          resolvedPayloadText = '\u{1F4C4} Document';
+          break;
+        case 'gif':
+          resolvedPayloadText = 'GIF';
+          break;
+        case 'sticker':
+          resolvedPayloadText = 'Sticker';
+          break;
+        case 'location':
+          resolvedPayloadText = '\u{1F4CD} Location';
+          break;
+        default:
+          resolvedPayloadText =
+              messageTypeStr.isNotEmpty ? '\u{1F4DD} Message' : '';
+      }
     }
 
     final displayText = resolvedPayloadText.isNotEmpty ? resolvedPayloadText : current.lastMessage;
@@ -518,6 +734,76 @@ class ChatCubit extends Cubit<ChatState> {
           ? resolvedPayloadText
           : '\u{1F4DD} Message';
 
+      // Resolve message type and media URL from socket payload (e.g. web app sends attachment_type + attachment_url).
+      MessageType resolvedType = MessageType.text;
+      if (attachmentUrlRaw.isNotEmpty || messageTypeStr.isNotEmpty) {
+        switch (messageTypeStr) {
+          case 'image':
+            resolvedType = MessageType.image;
+            break;
+          case 'video':
+            resolvedType = MessageType.video;
+            break;
+          case 'audio':
+          case 'voice':
+            resolvedType = MessageType.audio;
+            break;
+          case 'gif':
+            resolvedType = MessageType.gif;
+            break;
+          case 'sticker':
+            resolvedType = MessageType.sticker;
+            break;
+          case 'document':
+            resolvedType = MessageType.document;
+            break;
+          case 'location':
+            resolvedType = MessageType.location;
+            break;
+          default:
+            if (attachmentUrlRaw.isNotEmpty) resolvedType = MessageType.image;
+        }
+      }
+      final String? resolvedMediaUrl;
+      if (attachmentUrlRaw.isEmpty) {
+        resolvedMediaUrl = null;
+      } else if (attachmentUrlRaw.startsWith('http')) {
+        resolvedMediaUrl = attachmentUrlRaw;
+      } else if (attachmentUrlRaw.startsWith('/uploads/')) {
+        resolvedMediaUrl = '${AppConstants.apiBaseUrl}$attachmentUrlRaw';
+      } else {
+        resolvedMediaUrl = attachmentUrlRaw;
+      }
+
+      // Don't store "Photo" as caption for image messages — show image only.
+      final bool isPlaceholderCaption = messageTextForList == 'Photo' ||
+          messageTextForList == '\u{1F4F7} Photo';
+      final String messageText = (resolvedType == MessageType.image &&
+              isPlaceholderCaption)
+          ? ''
+          : messageTextForList;
+
+      final isViewOnce = data['is_view_once'] == true || data['isViewOnce'] == true;
+      final replyToMessageId = _stringFrom(data['reply_to_message_id']) ??
+          _stringFrom(data['replyToMessageId']);
+      final isForwarded =
+          data['is_forwarded'] == true || data['isForwarded'] == true;
+      final replyToSenderId = _stringFrom(data['reply_to_sender_id']) ??
+          _stringFrom(data['replyToSenderId']);
+      final replyToBody =
+          _stringFrom(data['reply_to_body']) ?? _stringFrom(data['replyToBody']);
+      final replyToAttachmentType =
+          _stringFrom(data['reply_to_attachment_type']) ??
+              _stringFrom(data['replyToAttachmentType']);
+      final viewOnceOpenedAtRaw = data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
+      final DateTime? viewOnceOpenedAt = viewOnceOpenedAtRaw != null
+          ? (viewOnceOpenedAtRaw is String
+              ? DateTime.tryParse(viewOnceOpenedAtRaw)
+              : viewOnceOpenedAtRaw is int
+                  ? DateTime.fromMillisecondsSinceEpoch(viewOnceOpenedAtRaw, isUtc: true)
+                  : null)
+          : null;
+
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
@@ -525,9 +811,18 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
-        text: messageTextForList,
+        text: messageText,
         timestamp: timestamp,
         status: MessageStatus.sent,
+        type: resolvedType,
+        mediaUrl: resolvedMediaUrl,
+        isViewOnce: isViewOnce,
+        viewOnceOpenedAt: viewOnceOpenedAt,
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+        replyToSenderId: replyToSenderId,
+        replyToBody: replyToBody,
+        replyToAttachmentType: replyToAttachmentType,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);
@@ -581,6 +876,33 @@ class ChatCubit extends Cubit<ChatState> {
     if (conversationId == null || state.selectedChannel?.id != conversationId) return;
     final isTyping = eventType == 'typing_indicator' ? data['is_typing'] == true : eventType == 'typing_start';
     emit(state.copyWith(isTyping: isTyping));
+  }
+
+  void _handleRecordingEvent(String eventType, Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null || state.selectedChannel?.id != conversationId) return;
+    final isRecording = eventType == 'recording_start';
+    emit(state.copyWith(isRecordingAudio: isRecording));
+  }
+
+  void _handleRecordingIndicatorEvent(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final conversationId = _stringFrom(data['conversation_id']);
+    if (conversationId == null || state.selectedChannel?.id != conversationId) {
+      return;
+    }
+
+    final isRecordingRaw = data['is_recording'];
+    final isRecording =
+        isRecordingRaw == true || _stringFrom(isRecordingRaw) == 'true';
+    emit(state.copyWith(isRecordingAudio: isRecording));
   }
 
   void _handleMessageSentAck(Map<String, dynamic> raw) {
@@ -724,6 +1046,26 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(channels: channels));
   }
 
+  void _handleMessageReaction(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+    final messageId = _stringFrom(data['message_id']);
+    final conversationId = _stringFrom(data['conversation_id']);
+    final userIdRaw = _stringFrom(data['user_id']);
+    final emoji = _stringFrom(data['emoji']) ?? '';
+    if (messageId == null || conversationId == null || userIdRaw == null) return;
+    final userId = _normalizeReactionUserId(userIdRaw);
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: conversationId,
+      userId: userId,
+      emoji: emoji,
+    );
+  }
+
   void _handleMessageDeleted(Map<String, dynamic> raw) {
     if (isClosed) return;
     final data = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
@@ -844,6 +1186,32 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  void _handleBlockStatus(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
+
+    final blocked = data['blocked'] == true;
+    final blockedId =
+        _stringFrom(data['blocked_id']) ?? _stringFrom(data['user_id']);
+    if (blockedId == null || blockedId.isEmpty) return;
+
+    if (blocked) {
+      final updatedChannels = List<ChatChannel>.from(state.channels)
+        ..removeWhere(
+          (c) =>
+              c.peerUserId == blockedId ||
+              c.id == 'channel_$blockedId' ||
+              c.id == blockedId,
+        );
+      emit(state.copyWith(channels: updatedChannels));
+    } else {
+      // Unblocked: refresh from server so chat list reappears if backend includes it.
+      refreshChatList();
+    }
+  }
+
   static String _bucketFromTimestamp(DateTime timestamp) {
     final y = timestamp.year;
     final m = timestamp.month;
@@ -899,6 +1267,7 @@ class ChatCubit extends Cubit<ChatState> {
     String channelId,
     String imagePath, {
     String text = '',
+    bool isViewOnce = false,
   }) async {
     emit(state.copyWith(isSending: true));
     try {
@@ -906,6 +1275,7 @@ class ChatCubit extends Cubit<ChatState> {
         channelId,
         imagePath,
         text: text,
+        isViewOnce: isViewOnce,
       );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(state.copyWith(messages: updatedMessages, isSending: false));
@@ -914,6 +1284,49 @@ class ChatCubit extends Cubit<ChatState> {
       _refreshChannelList();
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
+    }
+  }
+
+  /// Opens a view-once image message. Fetches temporary URL (valid 60s), downloads
+  /// image with auth, saves to temp file, and updates the message so it displays.
+  Future<void> openViewOnceMessage(String messageId) async {
+    final messages = state.messages;
+    final idx = messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    final message = messages[idx];
+    if (!message.isImage || !message.isViewOnce || message.isOutgoing) return;
+    if (message.viewOnceOpenedAt != null) return; // Already opened
+
+    try {
+      final result = await _repository.openViewOnceMessage(messageId);
+      final attachmentUrl = result.attachmentUrl;
+      final resolvedUrl = attachmentUrl.startsWith('http')
+          ? attachmentUrl
+          : attachmentUrl.startsWith('/')
+              ? '${AppConstants.apiBaseUrl}$attachmentUrl'
+              : '${AppConstants.apiBaseUrl}/$attachmentUrl';
+
+      // Fetch image bytes with same auth as API so it loads reliably
+      final bytes = await _repository.fetchImageBytes(resolvedUrl);
+      final dir = await getTemporaryDirectory();
+      final file = File('${dir.path}/view_once_$messageId.jpg');
+      await file.writeAsBytes(bytes);
+      final localPath = file.path;
+
+      final updated = message.copyWith(
+        mediaUrl: resolvedUrl,
+        viewOnceOpenedAt: result.viewOnceOpenedAt,
+      );
+      _repository.addOrUpdateMessage(updated);
+      final updatedMessages = List<Message>.from(messages)..[idx] = updated;
+      final paths = Map<String, String>.from(state.viewOnceLocalPaths)
+        ..[messageId] = localPath;
+      emit(state.copyWith(
+        messages: updatedMessages,
+        viewOnceLocalPaths: paths,
+      ));
+    } catch (e) {
+      emit(state.copyWith(error: e.toString()));
     }
   }
 
@@ -1262,28 +1675,128 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   void reactToMessage(String messageId, String emoji) {
+    final message = _messageById(messageId);
+    if (message == null) return;
+
+    final currentEmoji = _emojiForUser(
+      reactions: message.reactions,
+      userId: AppConstants.currentUserId,
+    );
+    final nextEmoji = currentEmoji == emoji ? '' : emoji;
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: message.channelId,
+      userId: AppConstants.currentUserId,
+      emoji: nextEmoji,
+    );
+
+    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendReactToMessage(
+        messageId: messageId,
+        conversationId: message.channelId,
+        emoji: nextEmoji,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  void removeReaction(String messageId, String emoji) {
+    final message = _messageById(messageId);
+    if (message == null) return;
+    final currentEmoji = _emojiForUser(
+      reactions: message.reactions,
+      userId: AppConstants.currentUserId,
+    );
+    if (currentEmoji != emoji) return;
+
+    _applyReactionUpdate(
+      messageId: messageId,
+      conversationId: message.channelId,
+      userId: AppConstants.currentUserId,
+      emoji: '',
+    );
+
+    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendReactToMessage(
+        messageId: messageId,
+        conversationId: message.channelId,
+        emoji: '',
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  String? _emojiForUser({
+    required Map<String, List<String>> reactions,
+    required String userId,
+  }) {
+    final normalizedUserId = _normalizeReactionUserId(userId);
+    for (final entry in reactions.entries) {
+      if (entry.value.contains(normalizedUserId)) return entry.key;
+    }
+    return null;
+  }
+
+  String _normalizeReactionUserId(String userId) {
+    final myBackendId = _repository.getCurrentUserId();
+    if (myBackendId != null &&
+        myBackendId.isNotEmpty &&
+        userId == myBackendId) {
+      return AppConstants.currentUserId;
+    }
+    return userId;
+  }
+
+  void _applyReactionUpdate({
+    required String messageId,
+    required String conversationId,
+    required String userId,
+    required String emoji,
+  }) {
+    final normalizedUserId = _normalizeReactionUserId(userId);
+    final myBackendId = _repository.getCurrentUserId();
+    final idsToRemove = <String>{normalizedUserId};
+    if (normalizedUserId == AppConstants.currentUserId &&
+        myBackendId != null &&
+        myBackendId.isNotEmpty) {
+      // Migrate any older reaction entries that used backend UUID.
+      idsToRemove.add(myBackendId);
+    }
+
     final updatedMessages = state.messages.map((m) {
-      if (m.id != messageId) return m;
+      if (m.id != messageId || m.channelId != conversationId) return m;
       final reactions = Map<String, List<String>>.from(
         m.reactions.map((k, v) => MapEntry(k, List<String>.from(v))),
       );
-      final users = reactions[emoji] ?? [];
-      if (users.contains(AppConstants.currentUserId)) {
-        users.remove(AppConstants.currentUserId);
+
+      // One reaction per user per message.
+      for (final key in reactions.keys.toList()) {
+        final users = reactions[key]!;
+        users.removeWhere((u) => idsToRemove.contains(u));
         if (users.isEmpty) {
-          reactions.remove(emoji);
+          reactions.remove(key);
         } else {
-          reactions[emoji] = users;
+          reactions[key] = users;
         }
-      } else {
-        reactions[emoji] = [...users, AppConstants.currentUserId];
       }
+
+      if (emoji.isNotEmpty) {
+        final users = reactions[emoji] ?? <String>[];
+        if (!users.contains(normalizedUserId)) users.add(normalizedUserId);
+        reactions[emoji] = users;
+      }
+
       return m.copyWith(reactions: reactions);
     }).toList();
-    emit(state.copyWith(messages: updatedMessages));
 
-    final msg = updatedMessages.firstWhere((m) => m.id == messageId);
-    _repository.updateMessageReactions(messageId, msg.reactions);
+    emit(state.copyWith(messages: updatedMessages));
+    final msg = updatedMessages.where((m) => m.id == messageId).firstOrNull;
+    if (msg != null) {
+      _repository.updateMessageReactions(messageId, msg.reactions);
+    }
   }
 
   void updateSearchQuery(String query) {
@@ -1351,6 +1864,34 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Sends recording_start when user starts recording voice note.
+  void sendRecordingStart(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendRecordingStart(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
+  /// Sends recording_stop when user stops/cancels/sends voice note.
+  void sendRecordingStop(String channelId) {
+    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+        (channelId.startsWith('channel_')
+            ? channelId.replaceFirst('channel_', '')
+            : null);
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      _repository.sendRecordingStop(
+        conversationId: channelId,
+        peerUserId: peerUserId,
+      );
+    }
+  }
+
   void deleteChat(String channelId) {
     _repository.deleteChat(channelId);
     final updated = List.of(state.channels)
@@ -1370,7 +1911,9 @@ class ChatCubit extends Cubit<ChatState> {
     emit(
       state.copyWith(
         clearSelectedChannel: true,
+        clearReplyingTo: true,
         isTyping: false,
+        isRecordingAudio: false,
         isOnline: false,
       ),
     );

@@ -25,6 +25,7 @@ class MediaPreviewScreen extends StatefulWidget {
 class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
   VideoPlayerController? _videoController;
   final TextEditingController _captionController = TextEditingController();
+  bool _isViewOnce = false;
 
   @override
   void initState() {
@@ -53,7 +54,12 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
     if (widget.isVideo) {
       cubit.sendVideoMessage(widget.channelId, widget.mediaPath, text: caption);
     } else {
-      cubit.sendImageMessage(widget.channelId, widget.mediaPath, text: caption);
+      cubit.sendImageMessage(
+        widget.channelId,
+        widget.mediaPath,
+        text: caption,
+        isViewOnce: _isViewOnce,
+      );
     }
 
     Navigator.pop(context); // Go back to chat screen
@@ -98,7 +104,7 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
             ),
           ),
 
-          // Bottom Bar (Caption + Send)
+          // Bottom Bar (Caption + View once + Send)
           Positioned(
             bottom: 0,
             left: 0,
@@ -117,7 +123,37 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
                   colors: [Colors.black87, Colors.transparent],
                 ),
               ),
-              child: Row(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (!widget.isVideo)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Row(
+                        children: [
+                          Icon(
+                            _isViewOnce ? Icons.visibility_off : Icons.visibility,
+                            color: _isViewOnce ? AppColors.accent : Colors.white70,
+                            size: 22,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            'View once',
+                            style: TextStyle(
+                              color: _isViewOnce ? AppColors.accent : Colors.white70,
+                              fontSize: 14,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Switch(
+                            value: _isViewOnce,
+                            onChanged: (v) => setState(() => _isViewOnce = v),
+                            activeColor: AppColors.accent,
+                          ),
+                        ],
+                      ),
+                    ),
+                  Row(
                 children: [
                   Expanded(
                     child: Container(
@@ -155,6 +191,8 @@ class _MediaPreviewScreenState extends State<MediaPreviewScreen> {
                       ),
                     ),
                   ),
+                ],
+              ),
                 ],
               ),
             ),

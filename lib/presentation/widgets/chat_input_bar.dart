@@ -8,7 +8,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:social_media_recorder/audio_encoder_type.dart';
 import 'package:social_media_recorder/screen/social_media_recorder.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
+import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../data/models/message.dart';
+import '../cubit/chat_cubit.dart';
 import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
@@ -23,6 +27,12 @@ class ChatInputBar extends StatefulWidget {
   final VoidCallback? onTypingStart;
   /// Called when user stops typing (input cleared, message sent, or screen left).
   final VoidCallback? onTypingStop;
+  /// Called when user starts recording audio.
+  final VoidCallback? onRecordingStart;
+  /// Called when user stops/cancels/sends recording.
+  final VoidCallback? onRecordingStop;
+  final Message? replyingTo;
+  final VoidCallback? onCancelReply;
 
   const ChatInputBar({
     super.key,
@@ -32,6 +42,10 @@ class ChatInputBar extends StatefulWidget {
     required this.onSendMedia,
     this.onTypingStart,
     this.onTypingStop,
+    this.onRecordingStart,
+    this.onRecordingStop,
+    this.replyingTo,
+    this.onCancelReply,
   });
 
   @override
@@ -56,6 +70,23 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     _tabController = TabController(length: 3, vsync: this);
     _controller.addListener(_onTextChanged);
     _initVoiceDir();
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatInputBar oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    final wasReplying = oldWidget.replyingTo != null;
+    final isReplying = widget.replyingTo != null;
+    if (!wasReplying && isReplying) {
+      if (_isEmojiVisible) {
+        setState(() => _isEmojiVisible = false);
+      }
+      // Ensure keyboard opens when user taps "Reply".
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _textFocusNode.requestFocus();
+      });
+    }
   }
 
   void _onTextChanged() {
@@ -115,6 +146,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   @override
   void dispose() {
     widget.onTypingStop?.call();
+    widget.onRecordingStop?.call();
     _typingThrottleTimer?.cancel();
     _controller.removeListener(_onTextChanged);
     _tabController.dispose();
@@ -165,6 +197,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   Future<void> _handleAudioSend(File soundFile, String time) async {
+    widget.onRecordingStop?.call();
     final duration = _parseRecordingTime(time);
     if (duration.inSeconds < 1) {
       try {
@@ -205,7 +238,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           Container(
             color: AppColors.scaffold,
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: _buildInputRow(),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (widget.replyingTo != null) _buildReplyPreview(widget.replyingTo!),
+                _buildInputRow(),
+              ],
+            ),
           ),
 
           // Emoji picker panel
@@ -252,6 +291,99 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     );
   }
 
+  Widget _buildReplyPreview(Message replyingTo) {
+    final cubit = context.read<ChatCubit>();
+    final myBackendId = cubit.repository.getCurrentUserId();
+    final sid = replyingTo.senderId;
+    final isMe = replyingTo.isOutgoing ||
+        sid == AppConstants.currentUserId ||
+        (myBackendId != null && myBackendId.isNotEmpty && sid == myBackendId);
+    final replySender = isMe
+        ? 'You'
+        : (cubit.state.selectedChannel?.name ?? sid);
+    String replyText = replyingTo.text.trim();
+    if (replyText.isEmpty) {
+      if (replyingTo.isImage) {
+        replyText = 'Photo';
+      } else if (replyingTo.isVideo) {
+        replyText = 'Video';
+      } else if (replyingTo.isAudio) {
+        replyText = 'Voice message';
+      } else if (replyingTo.isDocument) {
+        replyText = replyingTo.documentFileName ?? 'Document';
+      } else if (replyingTo.isLocation) {
+        replyText = 'Location';
+      } else if (replyingTo.isGif) {
+        replyText = 'GIF';
+      } else if (replyingTo.isSticker) {
+        replyText = 'Sticker';
+      }
+    }
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.fromLTRB(0, 0, 0, 4),
+      decoration: BoxDecoration(
+        color: AppColors.inputBar,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 3,
+            height: 44,
+            margin: const EdgeInsets.fromLTRB(10, 9, 10, 0),
+            decoration: BoxDecoration(
+              color: AppColors.accent,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          Expanded(
+            child: Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    replySender,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.accent,
+                      fontWeight: FontWeight.w600,
+                      fontSize: 13,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    replyText,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 2, right: 2),
+            child: IconButton(
+              icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
+              onPressed: widget.onCancelReply,
+              splashRadius: 18,
+              visualDensity: VisualDensity.compact,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
   /// Single stable layout.
   ///
   /// The TextField is ALWAYS in the tree (keyboard never closes).
@@ -288,6 +420,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           SocialMediaRecorder(
             sendRequestFunction: (File soundFile, String time) {
               _handleAudioSend(soundFile, time);
+            },
+            startRecording: () {
+              widget.onTypingStop?.call();
+              widget.onRecordingStart?.call();
+            },
+            stopRecording: (_) {
+              widget.onRecordingStop?.call();
             },
             storeSoundRecoringPath: _voiceNoteDir,
             encode: AudioEncoderType.AAC,

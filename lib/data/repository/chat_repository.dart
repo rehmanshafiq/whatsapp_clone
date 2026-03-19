@@ -1,5 +1,5 @@
-import 'dart:typed_data';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
@@ -13,6 +13,7 @@ import '../services/web_socket_service.dart';
 import 'chat_remote_data_source.dart';
 
 export '../models/message.dart' show MessageType;
+export 'chat_remote_data_source.dart' show ViewOnceOpenResult;
 
 class ChatRepository {
   final ChatRemoteDataSource _remoteDataSource;
@@ -32,6 +33,29 @@ class ChatRepository {
   /// Current user's id from backend (stored at login). Used to normalize
   /// message senderId so UI can show sent (right) vs received (left).
   String? getCurrentUserId() => _storageService.getUserId();
+
+  /// Headers for loading media from our API (Bearer + x-api-key). Used by
+  /// CachedNetworkImage so /uploads/... requests succeed.
+  Map<String, String>? getAuthHeadersForMedia() {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) return null;
+    return <String, String>{
+      'Authorization': 'Bearer $token',
+      'x-api-key': AppConstants.apiKey,
+    };
+  }
+
+  /// Fetches image bytes with auth (for view-once so image loads reliably).
+  Future<Uint8List> fetchImageBytes(String url) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.fetchImageBytes(url: url, token: token);
+  }
 
   UserSearchResult? get currentUserProfile => _cachedCurrentUserProfile;
 
@@ -68,8 +92,25 @@ class ChatRepository {
 
       await _webSocketService.connect(token: token);
       final remoteChats = await _remoteDataSource.fetchChats(token: token);
-      _storageService.saveChats(remoteChats);
-      return remoteChats;
+      // Filter out chats with blocked users so they don't reappear after refresh.
+      Set<String> blockedIds = <String>{};
+      try {
+        blockedIds = await _remoteDataSource.fetchBlockedUserIds(token: token);
+      } catch (_) {
+        // If blocked endpoint fails, fall back to showing chats.
+      }
+
+      final filtered = blockedIds.isEmpty
+          ? remoteChats
+          : remoteChats
+              .where((c) =>
+                  c.peerUserId == null ||
+                  c.peerUserId!.isEmpty ||
+                  !blockedIds.contains(c.peerUserId))
+              .toList();
+
+      _storageService.saveChats(filtered);
+      return filtered;
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -92,8 +133,15 @@ class ChatRepository {
       }
       final page =
           await _remoteDataSource.fetchMessages(channelId, token: token, limit: limit);
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
+      final existingById = <String, Message>{
+        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+      };
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
@@ -132,10 +180,15 @@ class ChatRepository {
         before: beforeMessageId,
         cursor: cursor,
       );
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       // Merge into storage: older messages go to the front of the channel's list
       final allMessages = _storageService.getMessages();
       final existing = allMessages.where((m) => m.channelId == channelId).toList();
+      final existingById = <String, Message>{for (final m in existing) m.id: m};
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       final existingIds = existing.map((m) => m.id).toSet();
       final newOlder = normalized
           .where((m) => !existingIds.contains(m.id))
@@ -176,6 +229,18 @@ class ChatRepository {
     return _normalizeMessageSenderIds(messages);
   }
 
+  List<Message> _mergeReactionsFromLocal({
+    required List<Message> incoming,
+    required Map<String, Message> existingById,
+  }) {
+    return incoming.map((m) {
+      if (m.reactions.isNotEmpty) return m;
+      final existing = existingById[m.id];
+      if (existing == null || existing.reactions.isEmpty) return m;
+      return m.copyWith(reactions: existing.reactions);
+    }).toList();
+  }
+
   /// Fetches messages for [channelId] from the server and updates local
   /// storage. Use for polling so new messages appear without WebSocket.
   Future<List<Message>> refreshMessagesFromServer(String channelId) async {
@@ -191,8 +256,15 @@ class ChatRepository {
         token: token,
         limit: ChatRemoteDataSource.defaultMessagesLimit,
       );
-      final normalized = _normalizeMessageSenderIds(page.messages);
+      var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
+      final existingById = <String, Message>{
+        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+      };
+      normalized = _mergeReactionsFromLocal(
+        incoming: normalized,
+        existingById: existingById,
+      );
       allMessages.removeWhere((m) => m.channelId == channelId);
       allMessages.addAll(normalized);
       _storageService.saveMessages(allMessages);
@@ -205,7 +277,12 @@ class ChatRepository {
     }
   }
 
-  Future<Message> sendMessage(String channelId, String text) async {
+  Future<Message> sendMessage(
+    String channelId,
+    String text, {
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) async {
     try {
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
       final message = Message(
@@ -215,6 +292,8 @@ class ChatRepository {
         text: text,
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
+        replyToMessageId: replyToMessageId.isEmpty ? null : replyToMessageId,
+        isForwarded: isForwarded,
       );
 
       final peerUserId = _getPeerUserIdForChannel(channelId);
@@ -226,6 +305,8 @@ class ChatRepository {
           body: text,
           attachmentType: '',
           attachmentUrl: '',
+          replyToMessageId: replyToMessageId,
+          isForwarded: isForwarded,
         );
       }
       await _remoteDataSource.sendMessage(message);
@@ -257,6 +338,18 @@ class ChatRepository {
     Duration audioDuration,
   ) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: audioPath,
+        token: token,
+        type: 'audio',
+      );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_audio';
       final message = Message(
         id: clientMsgId,
@@ -267,6 +360,7 @@ class ChatRepository {
         status: MessageStatus.sending,
         type: MessageType.audio,
         audioPath: audioPath,
+        mediaUrl: mediaUrl,
         audioDuration: audioDuration,
       );
 
@@ -279,7 +373,7 @@ class ChatRepository {
           body: '',
           // Backend contract: "voice" for voice notes.
           attachmentType: 'voice',
-          attachmentUrl: audioPath,
+          attachmentUrl: mediaUrl,
         );
       }
 
@@ -339,8 +433,21 @@ class ChatRepository {
     String channelId,
     String imagePath, {
     String text = '',
+    bool isViewOnce = false,
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: imagePath,
+        token: token,
+        type: 'image',
+      );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_image';
       final message = Message(
         id: clientMsgId,
@@ -350,7 +457,8 @@ class ChatRepository {
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.image,
-        mediaUrl: imagePath,
+        mediaUrl: mediaUrl,
+        isViewOnce: isViewOnce,
       );
 
       final peerUserId = _getPeerUserIdForChannel(channelId);
@@ -361,7 +469,8 @@ class ChatRepository {
           peerUserId: peerUserId,
           body: text,
           attachmentType: 'image',
-          attachmentUrl: imagePath,
+          attachmentUrl: mediaUrl,
+          isViewOnce: isViewOnce,
         );
       }
 
@@ -382,15 +491,39 @@ class ChatRepository {
     String text = '',
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: videoPath,
+        token: token,
+        type: 'video',
+      );
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'video',
+          attachmentUrl: mediaUrl,
+        );
+      }
       final message = Message(
-        id: 'msg_${DateTime.now().millisecondsSinceEpoch}_video',
+        id: clientMsgId,
         channelId: channelId,
         senderId: AppConstants.currentUserId,
         text: text,
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.video,
-        mediaUrl: videoPath,
+        mediaUrl: mediaUrl,
       );
 
       await _remoteDataSource.sendMessage(message);
@@ -487,6 +620,18 @@ class ChatRepository {
     required int fileSize,
   }) async {
     try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+      final mediaUrl = await _remoteDataSource.uploadMedia(
+        filePath: filePath,
+        token: token,
+        type: 'document',
+      );
       final message = Message(
         id: 'msg_${DateTime.now().millisecondsSinceEpoch}_document',
         channelId: channelId,
@@ -495,10 +640,23 @@ class ChatRepository {
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
         type: MessageType.document,
-        mediaUrl: filePath,
+        mediaUrl: mediaUrl,
         documentFileName: fileName,
         documentFileSize: fileSize,
       );
+
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: message.id,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          // Keep body empty for file sends; renderer should use attachment fields.
+          body: '',
+          attachmentType: 'document',
+          attachmentUrl: mediaUrl,
+        );
+      }
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -509,6 +667,96 @@ class ChatRepository {
     } catch (e) {
       throw ApiException(message: e.toString());
     }
+  }
+
+  Future<Message> forwardMessageToChannel({
+    required String channelId,
+    required Message source,
+  }) async {
+    try {
+      final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_fwd';
+      final attachmentType = _attachmentTypeForMessage(source);
+      final attachmentUrl = source.mediaUrl ?? '';
+      final body = source.text;
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: body,
+          attachmentType: attachmentType,
+          attachmentUrl: attachmentUrl,
+          isViewOnce: source.isViewOnce,
+          replyToMessageId: source.replyToMessageId ?? '',
+          isForwarded: true,
+        );
+      }
+
+      final message = Message(
+        id: clientMsgId,
+        channelId: channelId,
+        senderId: AppConstants.currentUserId,
+        text: body,
+        timestamp: DateTime.now(),
+        status: MessageStatus.sending,
+        type: source.type,
+        mediaUrl: source.mediaUrl,
+        audioPath: source.audioPath,
+        audioDuration: source.audioDuration,
+        latitude: source.latitude,
+        longitude: source.longitude,
+        locationName: source.locationName,
+        locationAddress: source.locationAddress,
+        isLiveLocation: source.isLiveLocation,
+        isLiveLocationActive: source.isLiveLocationActive,
+        liveLocationEndsAt: source.liveLocationEndsAt,
+        liveLocationUpdatedAt: source.liveLocationUpdatedAt,
+        contactId: source.contactId,
+        contactName: source.contactName,
+        contactPhone: source.contactPhone,
+        contactPhotoBase64: source.contactPhotoBase64,
+        documentFileName: source.documentFileName,
+        documentFileSize: source.documentFileSize,
+        isViewOnce: source.isViewOnce,
+        isForwarded: true,
+      );
+
+      await _remoteDataSource.sendMessage(message);
+      _persistMessage(message);
+      updateChannelLastMessage(channelId, _channelPreviewForMessage(message));
+      return message;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  String _attachmentTypeForMessage(Message message) {
+    if (message.isImage) return 'image';
+    if (message.isVideo) return 'video';
+    if (message.isAudio) return 'voice';
+    if (message.isGif) return 'gif';
+    if (message.isSticker) return 'sticker';
+    if (message.isDocument) return 'document';
+    if (message.isLocation) return 'location';
+    return '';
+  }
+
+  String _channelPreviewForMessage(Message message) {
+    if (message.text.trim().isNotEmpty) return message.text.trim();
+    if (message.isImage) return '\u{1F4F7} Photo';
+    if (message.isVideo) return '\u{1F3A5} Video';
+    if (message.isAudio) return '\u{1F3A4} Voice message';
+    if (message.isDocument) {
+      return '\u{1F4C4} ${message.documentFileName ?? 'Document'}';
+    }
+    if (message.isLocation) return '\u{1F4CD} Location';
+    if (message.isGif) return 'GIF';
+    if (message.isSticker) return 'Sticker';
+    return '\u{1F4DD} Message';
   }
 
   void _persistMessage(Message message) {
@@ -779,6 +1027,112 @@ class ChatRepository {
     return matches.isNotEmpty ? matches.first : null;
   }
 
+  /// Clears all messages for [conversationId] via API, then wipes local messages
+  /// and resets the channel's last message text.
+  Future<void> clearChatMessages(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.clearChatMessages(
+      conversationId: conversationId,
+      token: token,
+    );
+    // Remove local messages for this channel
+    final messages = _storageService.getMessages();
+    messages.removeWhere((m) => m.channelId == conversationId);
+    _storageService.saveMessages(messages);
+    // Reset last message on the channel
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == conversationId);
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(lastMessage: '');
+      _storageService.saveChats(chats);
+    }
+  }
+
+  /// Deletes a conversation via API, then removes the channel and its messages
+  /// from local storage.
+  Future<void> deleteConversationRemote(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.deleteConversation(
+      conversationId: conversationId,
+      token: token,
+    );
+    // Remove locally
+    deleteChat(conversationId);
+  }
+
+  /// Toggles mute on a conversation via API. Returns the new muted state
+  /// and updates the local channel.
+  Future<bool> toggleMuteConversation(String conversationId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    final chats = _storageService.getChats();
+    final idx = chats.indexWhere((c) => c.id == conversationId);
+    final currentMuted = idx >= 0 ? chats[idx].isMuted : false;
+    final desiredMuted = !currentMuted;
+
+    final isMuted = await _remoteDataSource.toggleMuteConversation(
+      conversationId: conversationId,
+      token: token,
+      isMuted: desiredMuted,
+    );
+    // Update local channel
+    if (idx >= 0) {
+      chats[idx] = chats[idx].copyWith(isMuted: isMuted);
+      _storageService.saveChats(chats);
+    }
+    return isMuted;
+  }
+
+  Future<void> blockUser(String userId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.blockUser(userId: userId, token: token);
+  }
+
+  Future<void> unblockUser(String userId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    await _remoteDataSource.unblockUser(userId: userId, token: token);
+  }
+
+  Future<List<UserSearchResult>> getBlockedUsers() async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.fetchBlockedUsers(token: token);
+  }
+
   /// Fetches presence (online status, last_seen) for the peer user of [channelId].
   /// Returns the channel with updated isOnline and lastSeen, or null on failure.
   Future<ChatChannel?> fetchPresenceForChannel(String channelId) async {
@@ -893,6 +1247,21 @@ class ChatRepository {
     }
   }
 
+  /// Opens a view-once message. Returns temporary image URL (valid 60 seconds).
+  Future<ViewOnceOpenResult> openViewOnceMessage(String messageId) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.openViewOnceMessage(
+      messageId: messageId,
+      token: token,
+    );
+  }
+
   void _sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
@@ -900,6 +1269,9 @@ class ChatRepository {
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
+    bool isViewOnce = false,
+    String replyToMessageId = '',
+    bool isForwarded = false,
   }) {
     if (!_webSocketService.isConnected) return;
 
@@ -913,6 +1285,9 @@ class ChatRepository {
         'body': body,
         'attachment_type': attachmentType,
         'attachment_url': attachmentUrl,
+        'is_view_once': isViewOnce,
+        'reply_to_message_id': replyToMessageId,
+        'is_forwarded': isForwarded,
       },
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
@@ -1044,6 +1419,68 @@ class ChatRepository {
       'event': 'typing_stop',
       'data': <String, dynamic>{
         'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends recording_start when user starts recording a voice note.
+  void sendRecordingStart({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'recording_start',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends recording_stop when user stops/cancels/sends voice recording.
+  void sendRecordingStop({
+    required String conversationId,
+    required String peerUserId,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'recording_stop',
+      'data': <String, dynamic>{
+        'conversation_id': conversationId,
+        'peer_user_id': peerUserId,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+  }
+
+  /// Sends react_to_message over websocket.
+  /// If [emoji] is empty, server removes the current user's reaction.
+  void sendReactToMessage({
+    required String messageId,
+    required String conversationId,
+    required String peerUserId,
+    required String emoji,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    final envelope = <String, dynamic>{
+      'event': 'react_to_message',
+      'data': <String, dynamic>{
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'emoji': emoji,
         'peer_user_id': peerUserId,
       },
       'timestamp': DateTime.now().millisecondsSinceEpoch,

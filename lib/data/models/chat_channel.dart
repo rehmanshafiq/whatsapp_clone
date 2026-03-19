@@ -16,6 +16,8 @@ class ChatChannel extends Equatable {
   final String? peerUserId;
   /// Last seen timestamp when peer is offline (from presence_update).
   final DateTime? lastSeen;
+  /// Whether the current user has muted this conversation.
+  final bool isMuted;
 
   const ChatChannel({
     required this.id,
@@ -29,6 +31,7 @@ class ChatChannel extends Equatable {
     this.lastMessageSenderId,
     this.peerUserId,
     this.lastSeen,
+    this.isMuted = false,
   });
 
   ChatChannel copyWith({
@@ -43,6 +46,7 @@ class ChatChannel extends Equatable {
     String? lastMessageSenderId,
     String? peerUserId,
     DateTime? lastSeen,
+    bool? isMuted,
   }) {
     return ChatChannel(
       id: id ?? this.id,
@@ -56,6 +60,7 @@ class ChatChannel extends Equatable {
       lastMessageSenderId: lastMessageSenderId ?? this.lastMessageSenderId,
       peerUserId: peerUserId ?? this.peerUserId,
       lastSeen: lastSeen ?? this.lastSeen,
+      isMuted: isMuted ?? this.isMuted,
     );
   }
 
@@ -71,6 +76,7 @@ class ChatChannel extends Equatable {
         'lastMessageSenderId': lastMessageSenderId,
         'peerUserId': peerUserId,
         'lastSeen': lastSeen?.toIso8601String(),
+        'isMuted': isMuted,
       };
 
   factory ChatChannel.fromJson(Map<String, dynamic> json) => ChatChannel(
@@ -92,6 +98,10 @@ class ChatChannel extends Equatable {
         lastSeen: json['lastSeen'] != null
             ? DateTime.tryParse(json['lastSeen'] as String)
             : null,
+        isMuted:
+            json['isMuted'] as bool? ??
+            json['is_muted'] as bool? ??
+            false,
       );
 
   @override
@@ -107,5 +117,6 @@ class ChatChannel extends Equatable {
         lastMessageSenderId,
         peerUserId,
         lastSeen,
+        isMuted,
       ];
 }

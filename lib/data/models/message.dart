@@ -40,6 +40,20 @@ class Message extends Equatable {
   final bool isEdited;
   /// When the message was last edited (from API edited_at).
   final DateTime? editedAt;
+  /// View-once image: recipient can open once; URL valid 60 seconds.
+  final bool isViewOnce;
+  /// When the view-once message was opened (from API view_once_opened_at).
+  final DateTime? viewOnceOpenedAt;
+  /// Original message id this message replies to.
+  final String? replyToMessageId;
+  /// Sender id of the original message being replied to.
+  final String? replyToSenderId;
+  /// Truncated preview of the original message body.
+  final String? replyToBody;
+  /// Attachment type of the original message being replied to.
+  final String? replyToAttachmentType;
+  /// True when this message was forwarded.
+  final bool isForwarded;
 
   const Message({
     required this.id,
@@ -71,6 +85,13 @@ class Message extends Equatable {
     this.readAt,
     this.isEdited = false,
     this.editedAt,
+    this.isViewOnce = false,
+    this.viewOnceOpenedAt,
+    this.replyToMessageId,
+    this.replyToSenderId,
+    this.replyToBody,
+    this.replyToAttachmentType,
+    this.isForwarded = false,
   });
 
   Message copyWith({
@@ -103,6 +124,13 @@ class Message extends Equatable {
     DateTime? readAt,
     bool? isEdited,
     DateTime? editedAt,
+    bool? isViewOnce,
+    DateTime? viewOnceOpenedAt,
+    String? replyToMessageId,
+    String? replyToSenderId,
+    String? replyToBody,
+    String? replyToAttachmentType,
+    bool? isForwarded,
   }) {
     return Message(
       id: id ?? this.id,
@@ -135,6 +163,14 @@ class Message extends Equatable {
       readAt: readAt ?? this.readAt,
       isEdited: isEdited ?? this.isEdited,
       editedAt: editedAt ?? this.editedAt,
+      isViewOnce: isViewOnce ?? this.isViewOnce,
+      viewOnceOpenedAt: viewOnceOpenedAt ?? this.viewOnceOpenedAt,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      replyToSenderId: replyToSenderId ?? this.replyToSenderId,
+      replyToBody: replyToBody ?? this.replyToBody,
+      replyToAttachmentType:
+          replyToAttachmentType ?? this.replyToAttachmentType,
+      isForwarded: isForwarded ?? this.isForwarded,
     );
   }
 
@@ -168,6 +204,13 @@ class Message extends Equatable {
     'readAt': readAt?.toIso8601String(),
     'isEdited': isEdited,
     'editedAt': editedAt?.toIso8601String(),
+    'isViewOnce': isViewOnce,
+    'viewOnceOpenedAt': viewOnceOpenedAt?.toIso8601String(),
+    'replyToMessageId': replyToMessageId,
+    'replyToSenderId': replyToSenderId,
+    'replyToBody': replyToBody,
+    'replyToAttachmentType': replyToAttachmentType,
+    'isForwarded': isForwarded,
   };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -218,6 +261,18 @@ class Message extends Equatable {
     editedAt: json['editedAt'] != null
         ? DateTime.parse(json['editedAt'] as String)
         : null,
+    isViewOnce: json['isViewOnce'] as bool? ?? false,
+    viewOnceOpenedAt: json['viewOnceOpenedAt'] != null
+        ? DateTime.parse(json['viewOnceOpenedAt'] as String)
+        : null,
+    replyToMessageId: json['replyToMessageId'] as String?,
+    replyToSenderId: json['replyToSenderId'] as String?,
+    replyToBody: json['replyToBody'] as String?,
+    replyToAttachmentType: json['replyToAttachmentType'] as String?,
+    isForwarded:
+        json['isForwarded'] as bool? ??
+        json['is_forwarded'] as bool? ??
+        false,
   );
 
   bool get isOutgoing => senderId == 'me';
@@ -261,5 +316,12 @@ class Message extends Equatable {
     readAt,
     isEdited,
     editedAt,
+    isViewOnce,
+    viewOnceOpenedAt,
+    replyToMessageId,
+    replyToSenderId,
+    replyToBody,
+    replyToAttachmentType,
+    isForwarded,
   ];
 }
