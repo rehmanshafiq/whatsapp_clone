@@ -371,12 +371,22 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
-  Future<void> sendMessage(String channelId, String text) async {
+  Future<void> sendMessage(
+    String channelId,
+    String text, {
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) async {
     if (text.trim().isEmpty) return;
 
     emit(state.copyWith(isSending: true));
     try {
-      final message = await _repository.sendMessage(channelId, text.trim());
+      final message = await _repository.sendMessage(
+        channelId,
+        text.trim(),
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+      );
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(state.copyWith(messages: updatedMessages, isSending: false));
 
@@ -666,6 +676,10 @@ class ChatCubit extends Cubit<ChatState> {
           : messageTextForList;
 
       final isViewOnce = data['is_view_once'] == true || data['isViewOnce'] == true;
+      final replyToMessageId = _stringFrom(data['reply_to_message_id']) ??
+          _stringFrom(data['replyToMessageId']);
+      final isForwarded =
+          data['is_forwarded'] == true || data['isForwarded'] == true;
       final viewOnceOpenedAtRaw = data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
       final DateTime? viewOnceOpenedAt = viewOnceOpenedAtRaw != null
           ? (viewOnceOpenedAtRaw is String
@@ -689,6 +703,8 @@ class ChatCubit extends Cubit<ChatState> {
         mediaUrl: resolvedMediaUrl,
         isViewOnce: isViewOnce,
         viewOnceOpenedAt: viewOnceOpenedAt,
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
       );
 
       final alreadyExists = state.messages.any((m) => m.id == message.id);

@@ -44,6 +44,10 @@ class Message extends Equatable {
   final bool isViewOnce;
   /// When the view-once message was opened (from API view_once_opened_at).
   final DateTime? viewOnceOpenedAt;
+  /// Original message id this message replies to.
+  final String? replyToMessageId;
+  /// True when this message was forwarded.
+  final bool isForwarded;
 
   const Message({
     required this.id,
@@ -77,6 +81,8 @@ class Message extends Equatable {
     this.editedAt,
     this.isViewOnce = false,
     this.viewOnceOpenedAt,
+    this.replyToMessageId,
+    this.isForwarded = false,
   });
 
   Message copyWith({
@@ -111,6 +117,8 @@ class Message extends Equatable {
     DateTime? editedAt,
     bool? isViewOnce,
     DateTime? viewOnceOpenedAt,
+    String? replyToMessageId,
+    bool? isForwarded,
   }) {
     return Message(
       id: id ?? this.id,
@@ -145,6 +153,8 @@ class Message extends Equatable {
       editedAt: editedAt ?? this.editedAt,
       isViewOnce: isViewOnce ?? this.isViewOnce,
       viewOnceOpenedAt: viewOnceOpenedAt ?? this.viewOnceOpenedAt,
+      replyToMessageId: replyToMessageId ?? this.replyToMessageId,
+      isForwarded: isForwarded ?? this.isForwarded,
     );
   }
 
@@ -180,6 +190,8 @@ class Message extends Equatable {
     'editedAt': editedAt?.toIso8601String(),
     'isViewOnce': isViewOnce,
     'viewOnceOpenedAt': viewOnceOpenedAt?.toIso8601String(),
+    'replyToMessageId': replyToMessageId,
+    'isForwarded': isForwarded,
   };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -234,6 +246,11 @@ class Message extends Equatable {
     viewOnceOpenedAt: json['viewOnceOpenedAt'] != null
         ? DateTime.parse(json['viewOnceOpenedAt'] as String)
         : null,
+    replyToMessageId: json['replyToMessageId'] as String?,
+    isForwarded:
+        json['isForwarded'] as bool? ??
+        json['is_forwarded'] as bool? ??
+        false,
   );
 
   bool get isOutgoing => senderId == 'me';
@@ -279,5 +296,7 @@ class Message extends Equatable {
     editedAt,
     isViewOnce,
     viewOnceOpenedAt,
+    replyToMessageId,
+    isForwarded,
   ];
 }

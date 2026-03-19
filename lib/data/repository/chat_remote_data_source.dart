@@ -497,6 +497,10 @@ class ChatRemoteDataSource {
     final isViewOnce = json['is_view_once'] == true || json['isViewOnce'] == true;
     final viewOnceOpenedAt = _asDateTime(json['view_once_opened_at']) ??
         _asDateTime(json['viewOnceOpenedAt']);
+    final replyToMessageId =
+        _asString(json['reply_to_message_id']) ?? _asString(json['replyToMessageId']);
+    final isForwarded =
+        json['is_forwarded'] == true || json['isForwarded'] == true;
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
@@ -512,6 +516,8 @@ class ChatRemoteDataSource {
       editedAt: editedAtValid,
       isViewOnce: isViewOnce,
       viewOnceOpenedAt: viewOnceOpenedAt,
+      replyToMessageId: replyToMessageId,
+      isForwarded: isForwarded,
     );
   }
 

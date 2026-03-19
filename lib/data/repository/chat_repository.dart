@@ -246,7 +246,12 @@ class ChatRepository {
     }
   }
 
-  Future<Message> sendMessage(String channelId, String text) async {
+  Future<Message> sendMessage(
+    String channelId,
+    String text, {
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) async {
     try {
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}';
       final message = Message(
@@ -256,6 +261,8 @@ class ChatRepository {
         text: text,
         timestamp: DateTime.now(),
         status: MessageStatus.sending,
+        replyToMessageId: replyToMessageId.isEmpty ? null : replyToMessageId,
+        isForwarded: isForwarded,
       );
 
       final peerUserId = _getPeerUserIdForChannel(channelId);
@@ -267,6 +274,8 @@ class ChatRepository {
           body: text,
           attachmentType: '',
           attachmentUrl: '',
+          replyToMessageId: replyToMessageId,
+          isForwarded: isForwarded,
         );
       }
       await _remoteDataSource.sendMessage(message);
@@ -604,6 +613,19 @@ class ChatRepository {
         documentFileName: fileName,
         documentFileSize: fileSize,
       );
+
+      final peerUserId = _getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _sendMessageOverSocket(
+          clientMsgId: message.id,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          // Keep body empty for file sends; renderer should use attachment fields.
+          body: '',
+          attachmentType: 'document',
+          attachmentUrl: mediaUrl,
+        );
+      }
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -1127,6 +1149,8 @@ class ChatRepository {
     String attachmentType = '',
     String attachmentUrl = '',
     bool isViewOnce = false,
+    String replyToMessageId = '',
+    bool isForwarded = false,
   }) {
     if (!_webSocketService.isConnected) return;
 
@@ -1141,6 +1165,8 @@ class ChatRepository {
         'attachment_type': attachmentType,
         'attachment_url': attachmentUrl,
         'is_view_once': isViewOnce,
+        'reply_to_message_id': replyToMessageId,
+        'is_forwarded': isForwarded,
       },
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
