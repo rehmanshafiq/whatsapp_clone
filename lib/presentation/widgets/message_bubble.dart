@@ -49,6 +49,39 @@ Widget _buildMediaContent(
   const double placeholderSize = 200;
   const double stickerSize = 120;
 
+  // View-once: sender, not yet opened by recipient → placeholder (no image for sender either)
+  if (message.isViewOnce && isOutgoing && message.viewOnceOpenedAt == null) {
+    return Container(
+      width: isSticker ? stickerSize : placeholderSize,
+      height: isSticker ? stickerSize : placeholderSize,
+      decoration: BoxDecoration(
+        color: AppColors.appBar.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.visibility_outlined,
+              color: AppColors.textSecondary,
+              size: 36,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'View once photo',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 13,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // View-once: recipient not opened -> tap to view placeholder
   if (message.isViewOnce &&
       !isOutgoing &&
@@ -158,7 +191,43 @@ Widget _buildMediaContent(
     );
   }
 
-  // Show image (view-once sender, or opened recipient within 60s, or normal image)
+  // View-once: sender — recipient has opened → show "Opened" (WhatsApp-style)
+  if (message.isViewOnce &&
+      isOutgoing &&
+      message.viewOnceOpenedAt != null) {
+    return Container(
+      width: isSticker ? stickerSize : placeholderSize,
+      height: isSticker ? stickerSize : placeholderSize,
+      decoration: BoxDecoration(
+        color: AppColors.appBar.withValues(alpha: 0.6),
+        borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(
+              Icons.visibility_outlined,
+              color: AppColors.textSecondary,
+              size: 36,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Opened',
+              style: TextStyle(
+                color: AppColors.textSecondary,
+                fontSize: 14,
+                fontWeight: FontWeight.w500,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Show image (view-once sender not yet opened, or opened recipient within 60s, or normal image)
   if (message.mediaUrl != null) {
     final isOurApiUrl = resolvedMediaUrl != null &&
         resolvedMediaUrl.startsWith('http') &&
