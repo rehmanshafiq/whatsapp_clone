@@ -697,7 +697,10 @@ class _MediaMessageBubble extends StatelessWidget {
                         fit: isSticker ? BoxFit.contain : BoxFit.cover,
                       ),
               ),
-            if (!isSticker && message.text.isNotEmpty)
+            if (!isSticker &&
+                message.text.isNotEmpty &&
+                message.text != 'Photo' &&
+                message.text != '\u{1F4F7} Photo')
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
                 child: Text(

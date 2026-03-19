@@ -652,6 +652,14 @@ class ChatCubit extends Cubit<ChatState> {
         resolvedMediaUrl = attachmentUrlRaw;
       }
 
+      // Don't store "Photo" as caption for image messages — show image only.
+      final bool isPlaceholderCaption = messageTextForList == 'Photo' ||
+          messageTextForList == '\u{1F4F7} Photo';
+      final String messageText = (resolvedType == MessageType.image &&
+              isPlaceholderCaption)
+          ? ''
+          : messageTextForList;
+
       final message = Message(
         id: _stringFrom(data['client_msg_id']) ??
             _stringFrom(data['message_id']) ??
@@ -659,7 +667,7 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
-        text: messageTextForList,
+        text: messageText,
         timestamp: timestamp,
         status: MessageStatus.sent,
         type: resolvedType,
