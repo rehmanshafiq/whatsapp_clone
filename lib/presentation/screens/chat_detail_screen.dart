@@ -304,10 +304,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           ),
                         ),
                         if (state.isRecordingAudio)
-                          const Text(
-                            'recording audio...',
-                            style: TextStyle(
-                                color: AppColors.accent, fontSize: 12),
+                          Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const RecordingDotIndicator(size: 8),
+                              const SizedBox(width: 6),
+                              const Text(
+                                'recording audio...',
+                                style: TextStyle(
+                                    color: AppColors.accent, fontSize: 12),
+                              ),
+                            ],
                           )
                         else if (state.isTyping)
                           const Text(

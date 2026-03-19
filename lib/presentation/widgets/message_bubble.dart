@@ -39,6 +39,51 @@ String? _resolveMediaUrl(String? url) {
   return url;
 }
 
+/// Small pulsing dot used for transient recording indicator UI.
+class RecordingDotIndicator extends StatefulWidget {
+  final double size;
+
+  const RecordingDotIndicator({super.key, this.size = 8});
+
+  @override
+  State<RecordingDotIndicator> createState() => _RecordingDotIndicatorState();
+}
+
+class _RecordingDotIndicatorState extends State<RecordingDotIndicator>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 700),
+    )..repeat(reverse: true);
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FadeTransition(
+      opacity: Tween<double>(begin: 0.35, end: 1).animate(_controller),
+      child: Container(
+        width: widget.size,
+        height: widget.size,
+        decoration: const BoxDecoration(
+          color: AppColors.accent,
+          shape: BoxShape.circle,
+        ),
+      ),
+    );
+  }
+}
+
 Widget _buildMediaContent(
   BuildContext context, {
   required Message message,
