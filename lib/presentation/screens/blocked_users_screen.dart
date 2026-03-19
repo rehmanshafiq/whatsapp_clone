@@ -96,7 +96,10 @@ class _BlockedUsersScreenState extends State<BlockedUsersScreen> {
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('${user.displayName} unblocked'),
+          content: Text('${user.displayName} unblocked', style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),),
           backgroundColor: AppColors.appBar,
         ),
       );

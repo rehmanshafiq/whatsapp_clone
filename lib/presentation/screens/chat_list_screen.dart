@@ -876,7 +876,11 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (!ctx.mounted) return;
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
-          content: Text('${channel.name} blocked'),
+          content: Text('${channel.name} blocked',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.w500,
+          ),),
           backgroundColor: AppColors.appBar,
           duration: const Duration(seconds: 2),
         ),
