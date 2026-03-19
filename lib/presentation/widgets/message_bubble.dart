@@ -110,32 +110,50 @@ Widget _buildMediaContent(
     );
   }
 
-  // View-once: recipient opened but expired
+  // View-once: recipient opened but expired — "Photo expired" bubble (clock + text)
   if (message.isViewOnce &&
       !isOutgoing &&
       message.viewOnceOpenedAt != null &&
       _isViewOnceExpired(message.viewOnceOpenedAt)) {
+    const expiredMutedColor = Color(0xFFA89888); // Muted light-tan for icon & text
     return Container(
       width: isSticker ? stickerSize : placeholderSize,
       height: isSticker ? stickerSize : placeholderSize,
       decoration: BoxDecoration(
-        color: AppColors.appBar,
+        color: const Color(0xFF1E262C), // Dark charcoal outer
         borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
       ),
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          Icon(Icons.visibility_off, color: AppColors.textSecondary, size: 36),
-          const SizedBox(height: 8),
-          Text(
-            'This photo is no longer available',
-            textAlign: TextAlign.center,
-            style: TextStyle(
-              color: AppColors.textSecondary,
-              fontSize: 12,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Container(
+          decoration: BoxDecoration(
+            color: const Color(0xFF252D35), // Slightly lighter inner area
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(
+                  Icons.schedule, // Clock icon (circle with hands)
+                  color: expiredMutedColor,
+                  size: 40,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Photo expired',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: expiredMutedColor,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ],
             ),
           ),
-        ],
+        ),
       ),
     );
   }
