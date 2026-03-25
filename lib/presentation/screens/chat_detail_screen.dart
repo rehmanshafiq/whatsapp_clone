@@ -204,6 +204,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.isTyping != curr.isTyping ||
           prev.isRecordingAudio != curr.isRecordingAudio ||
           prev.isOnline != curr.isOnline ||
+          prev.replyingTo != curr.replyingTo ||
           prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen ||
           prev.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline !=
               curr.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline,

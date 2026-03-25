@@ -70,8 +70,9 @@ class MessageActionSheet extends StatelessWidget {
                     icon: Icons.reply,
                     label: 'Reply',
                     onTap: () {
+                      final cubit = context.read<ChatCubit>();
+                      cubit.startReplyTo(message);
                       Navigator.pop(context);
-                      context.read<ChatCubit>().startReplyTo(message);
                     },
                   ),
                   _ActionButton(
@@ -95,7 +96,6 @@ class MessageActionSheet extends StatelessWidget {
                       }
                     },
                   ),
-
                   _ActionButton(
                     icon: Icons.delete_outline,
                     label: 'Delete',
