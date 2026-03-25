@@ -938,9 +938,13 @@ class ChatCubit extends Cubit<ChatState> {
 
       final message = Message(
         id:
-            _stringFrom(data['client_msg_id']) ??
-            _stringFrom(data['message_id']) ??
-            _stringFrom(data['id']) ??
+            (isOutgoing
+                ? _stringFrom(data['client_msg_id']) ??
+                      _stringFrom(data['message_id']) ??
+                      _stringFrom(data['id'])
+                : _stringFrom(data['message_id']) ??
+                      _stringFrom(data['id']) ??
+                      _stringFrom(data['client_msg_id'])) ??
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
@@ -949,6 +953,9 @@ class ChatCubit extends Cubit<ChatState> {
         status: MessageStatus.sent,
         type: resolvedType,
         mediaUrl: resolvedMediaUrl,
+        audioDuration: resolvedType == MessageType.audio
+            ? _parseAudioDurationFromPayload(data)
+            : null,
         isViewOnce: isViewOnce,
         viewOnceOpenedAt: viewOnceOpenedAt,
         replyToMessageId: replyToMessageId,
@@ -2115,6 +2122,77 @@ class ChatCubit extends Cubit<ChatState> {
     if (v == null) return null;
     if (v is String) return v.isEmpty ? null : v;
     return v.toString();
+  }
+
+  static Duration? _parseAudioDurationFromPayload(Map<String, dynamic> data) {
+    int? parsePositiveInt(dynamic raw) {
+      if (raw == null) return null;
+      if (raw is int) return raw > 0 ? raw : null;
+      if (raw is num) {
+        final value = raw.toInt();
+        return value > 0 ? value : null;
+      }
+      if (raw is String) {
+        final value = int.tryParse(raw);
+        if (value != null && value > 0) return value;
+      }
+      return null;
+    }
+
+    Duration? parseFromMap(Map<String, dynamic> map) {
+      const msKeys = [
+        'audio_duration_ms',
+        'voice_duration_ms',
+        'duration_ms',
+        'audioDurationMs',
+        'voiceDurationMs',
+        'durationMs',
+      ];
+      for (final key in msKeys) {
+        final value = parsePositiveInt(map[key]);
+        if (value != null) {
+          return Duration(milliseconds: value);
+        }
+      }
+
+      const secKeys = [
+        'audio_duration',
+        'voice_duration',
+        'duration',
+        'audioDuration',
+        'voiceDuration',
+      ];
+      for (final key in secKeys) {
+        final value = parsePositiveInt(map[key]);
+        if (value == null) continue;
+        // Plain fields are usually seconds; very large values are likely ms.
+        if (value <= 600) {
+          return Duration(seconds: value);
+        }
+        return Duration(milliseconds: value);
+      }
+
+      return null;
+    }
+
+    final direct = parseFromMap(data);
+    if (direct != null) return direct;
+
+    for (final nestedKey in const [
+      'metadata',
+      'attachment_metadata',
+      'audio',
+      'voice',
+      'attachment',
+    ]) {
+      final nested = data[nestedKey];
+      if (nested is Map<String, dynamic>) {
+        final nestedDuration = parseFromMap(nested);
+        if (nestedDuration != null) return nestedDuration;
+      }
+    }
+
+    return null;
   }
 }
 

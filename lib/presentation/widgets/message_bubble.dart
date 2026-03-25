@@ -419,12 +419,16 @@ class MessageBubble extends StatelessWidget {
         onReactionChanged?.call();
       },
       child: GestureDetector(
-        onHorizontalDragEnd: (details) {
-          final velocity = details.primaryVelocity ?? 0;
-          if (velocity.abs() > 200) {
-            MessageActionSheet.show(context, message);
-          }
-        },
+        // Audio bubbles have an internal horizontal drag for waveform seeking.
+        // Keep parent swipe gesture disabled there so seek drag can win.
+        onHorizontalDragEnd: message.isAudio
+            ? null
+            : (details) {
+                final velocity = details.primaryVelocity ?? 0;
+                if (velocity.abs() > 200) {
+                  MessageActionSheet.show(context, message);
+                }
+              },
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: message.isOutgoing

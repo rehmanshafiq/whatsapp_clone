@@ -385,6 +385,7 @@ class ChatRepository {
           // Backend contract: "voice" for voice notes.
           attachmentType: 'voice',
           attachmentUrl: mediaUrl,
+          audioDuration: audioDuration,
         );
       }
 
@@ -699,6 +700,7 @@ class ChatRepository {
           body: body,
           attachmentType: attachmentType,
           attachmentUrl: attachmentUrl,
+          audioDuration: source.isAudio ? source.audioDuration : null,
           isViewOnce: source.isViewOnce,
           replyToMessageId: source.replyToMessageId ?? '',
           isForwarded: true,
@@ -1294,6 +1296,7 @@ class ChatRepository {
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
+    Duration? audioDuration,
     bool isViewOnce = false,
     String replyToMessageId = '',
     bool isForwarded = false,
@@ -1310,6 +1313,10 @@ class ChatRepository {
         'body': body,
         'attachment_type': attachmentType,
         'attachment_url': attachmentUrl,
+        if (audioDuration != null) ...{
+          'audio_duration_ms': audioDuration.inMilliseconds,
+          'audio_duration': audioDuration.inSeconds,
+        },
         'is_view_once': isViewOnce,
         'reply_to_message_id': replyToMessageId,
         'is_forwarded': isForwarded,

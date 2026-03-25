@@ -406,7 +406,8 @@ class ChatRemoteDataSource {
       nextCursor = _asString(
         data['next_cursor'] ?? data['cursor'] ?? data['next_cursor_token'],
       );
-      final hasMoreVal = data['has_more'] ?? data['hasMore'] ?? data['has_next'];
+      final hasMoreVal =
+          data['has_more'] ?? data['hasMore'] ?? data['has_next'];
       if (hasMoreVal is bool) {
         hasMore = hasMoreVal;
       } else if (hasMoreVal != null) {
@@ -423,21 +424,25 @@ class ChatRemoteDataSource {
 
   Message _mapMessageFromApi(Map<String, dynamic> json) {
     final id = _asString(json['id']) ?? _asString(json['message_id']) ?? '';
-    final channelId = _asString(json['conversation_id']) ??
+    final channelId =
+        _asString(json['conversation_id']) ??
         _asString(json['channel_id']) ??
         _asString(json['channelId']) ??
         '';
-    final senderId = _asString(json['sender_id']) ??
+    final senderId =
+        _asString(json['sender_id']) ??
         _asString(json['user_id']) ??
         _asString(json['from_user_id']) ??
         _asString(json['senderId']) ??
         '';
-    final text = _asString(json['text']) ??
+    final text =
+        _asString(json['text']) ??
         _asString(json['message']) ??
         _asString(json['content']) ??
         _asString(json['body']) ??
         '';
-    final ts = _asDateTime(json['timestamp']) ??
+    final ts =
+        _asDateTime(json['timestamp']) ??
         _asDateTime(json['created_at']) ??
         _asDateTime(json['sent_at']) ??
         _asDateTime(json['last_message_at']) ??
@@ -453,10 +458,11 @@ class ChatRemoteDataSource {
         status = MessageStatus.values[i];
       }
     }
-    final attachmentUrl = _asString(json['attachment_url']) ??
-        _asString(json['mediaUrl']) ??
-        '';
-    final attachmentType = _asString(json['attachment_type'])?.toLowerCase() ?? '';
+    final attachmentUrl =
+        _asString(json['attachment_url']) ?? _asString(json['mediaUrl']) ?? '';
+    final attachmentType =
+        _asString(json['attachment_type'])?.toLowerCase() ?? '';
+    final audioDuration = _parseAudioDurationFromPayload(json);
     MessageType type = MessageType.text;
     if (attachmentUrl.isNotEmpty || attachmentType.isNotEmpty) {
       switch (attachmentType) {
@@ -487,23 +493,30 @@ class ChatRemoteDataSource {
       }
     }
     final isEdited = json['is_edited'] == true || json['isEdited'] == true;
-    final editedAt = _asDateTime(json['edited_at']) ?? _asDateTime(json['editedAt']);
-    final editedAtValid = editedAt != null &&
-        editedAt.isAfter(DateTime.utc(2000, 1, 1))
+    final editedAt =
+        _asDateTime(json['edited_at']) ?? _asDateTime(json['editedAt']);
+    final editedAtValid =
+        editedAt != null && editedAt.isAfter(DateTime.utc(2000, 1, 1))
         ? editedAt
         : null;
-    final deliveredAt = _asDateTime(json['delivered_at']) ?? _asDateTime(json['deliveredAt']);
+    final deliveredAt =
+        _asDateTime(json['delivered_at']) ?? _asDateTime(json['deliveredAt']);
     final readAt = _asDateTime(json['read_at']) ?? _asDateTime(json['readAt']);
-    final isViewOnce = json['is_view_once'] == true || json['isViewOnce'] == true;
-    final viewOnceOpenedAt = _asDateTime(json['view_once_opened_at']) ??
+    final isViewOnce =
+        json['is_view_once'] == true || json['isViewOnce'] == true;
+    final viewOnceOpenedAt =
+        _asDateTime(json['view_once_opened_at']) ??
         _asDateTime(json['viewOnceOpenedAt']);
     final replyToMessageId =
-        _asString(json['reply_to_message_id']) ?? _asString(json['replyToMessageId']);
+        _asString(json['reply_to_message_id']) ??
+        _asString(json['replyToMessageId']);
     final replyToSenderId =
-        _asString(json['reply_to_sender_id']) ?? _asString(json['replyToSenderId']);
+        _asString(json['reply_to_sender_id']) ??
+        _asString(json['replyToSenderId']);
     final replyToBody =
         _asString(json['reply_to_body']) ?? _asString(json['replyToBody']);
-    final replyToAttachmentType = _asString(json['reply_to_attachment_type']) ??
+    final replyToAttachmentType =
+        _asString(json['reply_to_attachment_type']) ??
         _asString(json['replyToAttachmentType']);
     final isForwarded =
         json['is_forwarded'] == true || json['isForwarded'] == true;
@@ -516,6 +529,7 @@ class ChatRemoteDataSource {
       status: status,
       type: type,
       mediaUrl: attachmentUrl.isEmpty ? null : attachmentUrl,
+      audioDuration: type == MessageType.audio ? audioDuration : null,
       deliveredAt: deliveredAt,
       readAt: readAt,
       isEdited: isEdited,
@@ -630,7 +644,9 @@ class ChatRemoteDataSource {
     required String url,
     required String token,
   }) async {
-    final fullUrl = url.startsWith('http') ? url : '${AppConstants.apiBaseUrl}$url';
+    final fullUrl = url.startsWith('http')
+        ? url
+        : '${AppConstants.apiBaseUrl}$url';
     final response = await _dio.get<dynamic>(
       fullUrl,
       options: Options(
@@ -642,8 +658,16 @@ class ChatRemoteDataSource {
       ),
     );
     final data = response.data;
-    if (data == null) throw const ApiException(message: 'Empty image response', statusCode: 500);
-    if (data is! Uint8List) throw const ApiException(message: 'Invalid image response', statusCode: 500);
+    if (data == null)
+      throw const ApiException(
+        message: 'Empty image response',
+        statusCode: 500,
+      );
+    if (data is! Uint8List)
+      throw const ApiException(
+        message: 'Invalid image response',
+        statusCode: 500,
+      );
     return data;
   }
 
@@ -669,17 +693,11 @@ class ChatRemoteDataSource {
     try {
       final file = File(filePath);
       if (!await file.exists()) {
-        throw const ApiException(
-          message: 'File not found',
-          statusCode: 400,
-        );
+        throw const ApiException(message: 'File not found', statusCode: 400);
       }
       final fileName = filePath.split(RegExp(r'[/\\]')).last;
       if (fileName.isEmpty) {
-        throw const ApiException(
-          message: 'Invalid file path',
-          statusCode: 400,
-        );
+        throw const ApiException(message: 'Invalid file path', statusCode: 400);
       }
 
       final formData = FormData.fromMap({
@@ -978,9 +996,7 @@ class ChatRemoteDataSource {
 
   /// Returns a set of all blocked user ids (blocked by me OR blocked by others).
   /// GET /api/v1/chat/blocked-users
-  Future<Set<String>> fetchBlockedUserIds({
-    required String token,
-  }) async {
+  Future<Set<String>> fetchBlockedUserIds({required String token}) async {
     try {
       final response = await _dio.get<dynamic>(
         '/api/v1/chat/blocked-users',
@@ -1000,9 +1016,7 @@ class ChatRemoteDataSource {
         final blockedByMe = data['blocked_by_me'];
         final blockedByOthers = data['blocked_by_others'];
         if (blockedByMe is List) {
-          ids.addAll(
-            blockedByMe.map((e) => _asString(e)).whereType<String>(),
-          );
+          ids.addAll(blockedByMe.map((e) => _asString(e)).whereType<String>());
         }
         if (blockedByOthers is List) {
           ids.addAll(
@@ -1168,6 +1182,64 @@ class ChatRemoteDataSource {
     if (value is int) return value;
     if (value is num) return value.toInt();
     if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  Duration? _parseAudioDurationFromPayload(Map<String, dynamic> data) {
+    Duration? parseFromMap(Map<String, dynamic> map) {
+      const msKeys = [
+        'audio_duration_ms',
+        'voice_duration_ms',
+        'duration_ms',
+        'audioDurationMs',
+        'voiceDurationMs',
+        'durationMs',
+      ];
+      for (final key in msKeys) {
+        final raw = _asInt(map[key]);
+        if (raw != null && raw > 0) {
+          return Duration(milliseconds: raw);
+        }
+      }
+
+      const secKeys = [
+        'audio_duration',
+        'voice_duration',
+        'duration',
+        'audioDuration',
+        'voiceDuration',
+      ];
+      for (final key in secKeys) {
+        final raw = _asInt(map[key]);
+        if (raw == null || raw <= 0) continue;
+        // Heuristic: plain duration fields are commonly seconds.
+        // If unusually large, treat as milliseconds.
+        if (raw <= 600) {
+          return Duration(seconds: raw);
+        }
+        return Duration(milliseconds: raw);
+      }
+
+      return null;
+    }
+
+    final direct = parseFromMap(data);
+    if (direct != null) return direct;
+
+    for (final nestedKey in const [
+      'metadata',
+      'attachment_metadata',
+      'audio',
+      'voice',
+      'attachment',
+    ]) {
+      final nested = data[nestedKey];
+      if (nested is Map<String, dynamic>) {
+        final nestedDuration = parseFromMap(nested);
+        if (nestedDuration != null) return nestedDuration;
+      }
+    }
+
     return null;
   }
 

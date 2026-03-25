@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:path_provider/path_provider.dart';
 
 import '../../core/di/service_locator.dart';
 import '../../core/constants/app_constants.dart';
@@ -28,6 +29,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   Duration _totalDuration = Duration.zero;
   double _playbackSpeed = 1.0;
   bool _isSeeking = false;
+  bool _isPreparingRemoteAudio = false;
+  String? _cachedRemoteFilePath;
 
   late final StreamSubscription<String?> _playingIdSub;
   late final StreamSubscription<Duration> _positionSub;
@@ -46,7 +49,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
     _playingIdSub = _playbackService.playingIdStream.listen((id) {
       if (!mounted) return;
-      final playing = id == widget.message.id &&
+      final playing =
+          id == widget.message.id &&
           _playbackService.state == PlayerState.playing;
       if (playing != _isPlaying) {
         setState(() => _isPlaying = playing);
@@ -58,6 +62,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
             _playbackSpeed = 1.0;
           });
         }
+      } else if (_totalDuration <= Duration.zero) {
+        unawaited(_syncDurationFromPlayer());
       }
     });
 
@@ -93,6 +99,10 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   }
 
   void _togglePlayback() {
+    unawaited(_togglePlaybackInternal());
+  }
+
+  Future<void> _togglePlaybackInternal() async {
     // Prefer explicit audioPath (local recording). Fall back to mediaUrl
     // for audio/voice messages coming from the server that only provide
     // attachment_url.
@@ -103,11 +113,77 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     final resolvedPath = path.startsWith('/uploads/')
         ? '${AppConstants.apiBaseUrl}$path'
         : path;
-
-    if (!resolvedPath.startsWith('http')) {
-      if (!File(resolvedPath).existsSync()) return;
+    final playablePath = await _resolvePlayablePath(resolvedPath);
+    if (playablePath == null) return;
+    await _playbackService.play(widget.message.id, playablePath);
+    if (_totalDuration <= Duration.zero) {
+      unawaited(_syncDurationFromPlayer());
     }
-    _playbackService.play(widget.message.id, resolvedPath);
+  }
+
+  Future<String?> _resolvePlayablePath(String resolvedPath) async {
+    if (!resolvedPath.startsWith('http')) {
+      return File(resolvedPath).existsSync() ? resolvedPath : null;
+    }
+
+    final cachedPath = _cachedRemoteFilePath;
+    if (cachedPath != null && File(cachedPath).existsSync()) {
+      return cachedPath;
+    }
+    if (_isPreparingRemoteAudio) {
+      return resolvedPath;
+    }
+
+    _isPreparingRemoteAudio = true;
+    try {
+      final uri = Uri.tryParse(resolvedPath);
+      if (uri == null) return resolvedPath;
+
+      final tempDir = await getTemporaryDirectory();
+      final localPath =
+          '${tempDir.path}/audio_${widget.message.id}${_inferAudioExtension(uri.path)}';
+      final localFile = File(localPath);
+
+      if (!localFile.existsSync() || localFile.lengthSync() == 0) {
+        final client = HttpClient();
+        try {
+          final request = await client.getUrl(uri);
+          final response = await request.close();
+          if (response.statusCode < 200 || response.statusCode >= 300) {
+            return resolvedPath;
+          }
+          final sink = localFile.openWrite();
+          await for (final chunk in response) {
+            sink.add(chunk);
+          }
+          await sink.close();
+        } finally {
+          client.close(force: true);
+        }
+      }
+
+      if (localFile.existsSync() && localFile.lengthSync() > 0) {
+        _cachedRemoteFilePath = localFile.path;
+        return localFile.path;
+      }
+    } catch (_) {
+      // Fall back to direct URL playback when local caching fails.
+    } finally {
+      _isPreparingRemoteAudio = false;
+    }
+
+    return resolvedPath;
+  }
+
+  String _inferAudioExtension(String sourcePath) {
+    final lower = sourcePath.toLowerCase();
+    if (lower.endsWith('.m4a')) return '.m4a';
+    if (lower.endsWith('.aac')) return '.aac';
+    if (lower.endsWith('.mp3')) return '.mp3';
+    if (lower.endsWith('.wav')) return '.wav';
+    if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return '.ogg';
+    if (lower.endsWith('.opus')) return '.opus';
+    return '.m4a';
   }
 
   void _cycleSpeed() {
@@ -141,6 +217,11 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     _playbackService.seek(_position);
   }
 
+  void _onDragCancel() {
+    if (!_isThisMessage) return;
+    _isSeeking = false;
+  }
+
   void _onTapSeek(double fraction) {
     if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
     final clamped = fraction.clamp(0.0, 1.0);
@@ -149,6 +230,23 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     );
     setState(() => _position = seekPos);
     _playbackService.seek(seekPos);
+  }
+
+  Future<void> _syncDurationFromPlayer() async {
+    // Remote audio can report duration a bit later than play() call.
+    // Probe briefly so waveform seeking activates as soon as metadata arrives.
+    for (var i = 0; i < 6; i++) {
+      if (!mounted || !_isThisMessage) return;
+      final duration = await _playbackService.getDuration();
+      if (!mounted || !_isThisMessage) return;
+      if (duration != null && duration > Duration.zero) {
+        if (_totalDuration != duration) {
+          setState(() => _totalDuration = duration);
+        }
+        return;
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
   }
 
   String _formatDuration(Duration d) {
@@ -165,11 +263,12 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     final time =
         '${hourRaw == 0 ? 12 : hourRaw}:${widget.message.timestamp.minute.toString().padLeft(2, '0')} $period';
 
-    final displayDuration =
-        _isPlaying || _isThisMessage ? _position : Duration.zero;
+    final displayDuration = _isPlaying || _isThisMessage
+        ? _position
+        : Duration.zero;
     final progress = _totalDuration.inMilliseconds > 0
         ? (displayDuration.inMilliseconds / _totalDuration.inMilliseconds)
-            .clamp(0.0, 1.0)
+              .clamp(0.0, 1.0)
         : 0.0;
 
     return Align(
@@ -218,6 +317,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                     onDragStart: _onDragStart,
                     onDragUpdate: _onDragUpdate,
                     onDragEnd: _onDragEnd,
+                    onDragCancel: _onDragCancel,
                   ),
                   const SizedBox(height: 4),
                   Row(
@@ -231,8 +331,9 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                                 ? _formatDuration(_position)
                                 : _formatDuration(_totalDuration),
                             style: TextStyle(
-                              color: AppColors.textSecondary
-                                  .withValues(alpha: 0.8),
+                              color: AppColors.textSecondary.withValues(
+                                alpha: 0.8,
+                              ),
                               fontSize: 11,
                             ),
                           ),
@@ -252,15 +353,18 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
                           Text(
                             time,
                             style: TextStyle(
-                              color: AppColors.textSecondary
-                                  .withValues(alpha: 0.7),
+                              color: AppColors.textSecondary.withValues(
+                                alpha: 0.7,
+                              ),
                               fontSize: 11,
                             ),
                           ),
                           if (isOutgoing) ...[
                             const SizedBox(width: 4),
                             MessageStatusIcon(
-                                status: widget.message.status, size: 14),
+                              status: widget.message.status,
+                              size: 14,
+                            ),
                           ],
                         ],
                       ),
@@ -358,6 +462,7 @@ class _SeekableWaveformBar extends StatelessWidget {
   final VoidCallback onDragStart;
   final ValueChanged<double> onDragUpdate;
   final VoidCallback onDragEnd;
+  final VoidCallback onDragCancel;
 
   const _SeekableWaveformBar({
     required this.progress,
@@ -366,6 +471,7 @@ class _SeekableWaveformBar extends StatelessWidget {
     required this.onDragStart,
     required this.onDragUpdate,
     required this.onDragEnd,
+    required this.onDragCancel,
   });
 
   @override
@@ -374,8 +480,9 @@ class _SeekableWaveformBar extends StatelessWidget {
       builder: (context, constraints) {
         const barWidth = 2.5;
         const barSpacing = 1.5;
-        final barCount =
-            (constraints.maxWidth / (barWidth + barSpacing)).floor().clamp(1, 40);
+        final barCount = (constraints.maxWidth / (barWidth + barSpacing))
+            .floor()
+            .clamp(1, 40);
         final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;
 
         double fractionFromX(double dx) =>
@@ -394,14 +501,15 @@ class _SeekableWaveformBar extends StatelessWidget {
             onDragUpdate(fractionFromX(details.localPosition.dx));
           },
           onHorizontalDragEnd: (_) => onDragEnd(),
+          onHorizontalDragCancel: onDragCancel,
           child: CustomPaint(
             size: Size(constraints.maxWidth, 28),
             painter: _WaveformPainter(
               progress: progress,
-              activeColor:
-                  isOutgoing ? AppColors.textPrimary : AppColors.accent,
-              inactiveColor:
-                  AppColors.textSecondary.withValues(alpha: 0.3),
+              activeColor: isOutgoing
+                  ? AppColors.textPrimary
+                  : AppColors.accent,
+              inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
             ),
           ),
         );
@@ -422,18 +530,56 @@ class _WaveformPainter extends CustomPainter {
   });
 
   static const _barHeights = [
-    0.3, 0.5, 0.7, 0.4, 0.9, 0.6, 0.8, 0.3, 0.7, 0.5,
-    0.6, 0.9, 0.4, 0.8, 0.3, 0.7, 0.5, 0.9, 0.6, 0.4,
-    0.8, 0.3, 0.7, 0.5, 0.9, 0.4, 0.6, 0.8, 0.3, 0.7,
-    0.5, 0.4, 0.8, 0.6, 0.9, 0.3, 0.7, 0.5, 0.4, 0.8,
+    0.3,
+    0.5,
+    0.7,
+    0.4,
+    0.9,
+    0.6,
+    0.8,
+    0.3,
+    0.7,
+    0.5,
+    0.6,
+    0.9,
+    0.4,
+    0.8,
+    0.3,
+    0.7,
+    0.5,
+    0.9,
+    0.6,
+    0.4,
+    0.8,
+    0.3,
+    0.7,
+    0.5,
+    0.9,
+    0.4,
+    0.6,
+    0.8,
+    0.3,
+    0.7,
+    0.5,
+    0.4,
+    0.8,
+    0.6,
+    0.9,
+    0.3,
+    0.7,
+    0.5,
+    0.4,
+    0.8,
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
     const barWidth = 2.5;
     const barSpacing = 1.5;
-    final barCount =
-        (size.width / (barWidth + barSpacing)).floor().clamp(1, _barHeights.length);
+    final barCount = (size.width / (barWidth + barSpacing)).floor().clamp(
+      1,
+      _barHeights.length,
+    );
 
     // The actual width the waveform bars occupy (last bar has no trailing gap)
     final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;

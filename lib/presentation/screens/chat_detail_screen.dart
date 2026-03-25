@@ -182,7 +182,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String _formatLastSeen(DateTime? lastSeen) {
     if (lastSeen == null) return 'last seen recently';
     final local = lastSeen.isUtc ? lastSeen.toLocal() : lastSeen;
-    final hour12 = local.hour == 0 ? 12 : (local.hour > 12 ? local.hour - 12 : local.hour);
+    final hour12 = local.hour == 0
+        ? 12
+        : (local.hour > 12 ? local.hour - 12 : local.hour);
     final ampm = local.hour >= 12 ? 'PM' : 'AM';
     final timeStr = '$hour12:${local.minute.toString().padLeft(2, '0')} $ampm';
     return 'last seen $timeStr';
@@ -197,7 +199,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return BlocConsumer<ChatCubit, ChatState>(
       // ── Rebuild condition ─────────────────────────────────────────
       buildWhen: (prev, curr) =>
-      prev.messages != curr.messages ||
+          prev.messages != curr.messages ||
           prev.selectedChannel != curr.selectedChannel ||
           prev.isLoading != curr.isLoading ||
           prev.isPaginationLoading != curr.isPaginationLoading ||
@@ -206,13 +208,19 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.isOnline != curr.isOnline ||
           prev.replyingTo != curr.replyingTo ||
           prev.selectedChannel?.lastSeen != curr.selectedChannel?.lastSeen ||
-          prev.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline !=
-              curr.channels.where((c) => c.id == widget.channelId).firstOrNull?.isOnline,
+          prev.channels
+                  .where((c) => c.id == widget.channelId)
+                  .firstOrNull
+                  ?.isOnline !=
+              curr.channels
+                  .where((c) => c.id == widget.channelId)
+                  .firstOrNull
+                  ?.isOnline,
 
       // ── Side-effect condition ─────────────────────────────────────
       listenWhen: (prev, curr) =>
-      // New messages arrived (new socket message or initial load).
-      prev.messages.length != curr.messages.length ||
+          // New messages arrived (new socket message or initial load).
+          prev.messages.length != curr.messages.length ||
           // Initial load finished.
           (prev.isLoading && !curr.isLoading && curr.messages.isNotEmpty) ||
           // Pagination finished — need to restore scroll position.
@@ -228,7 +236,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         // ── Auto-scroll to bottom for new incoming/outgoing messages ──
         // Only when the user is already at the bottom; otherwise leave them
         // where they are (they may be reading older messages).
-        final atBottom = _scrollController.hasClients &&
+        final atBottom =
+            _scrollController.hasClients &&
             _scrollController.position.pixels <= _atBottomThreshold;
         if (atBottom) {
           _scrollToBottom(animate: forThisChat.length > 1);
@@ -244,10 +253,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
 
-        final channelIsOnline = state.channels
-            .where((c) => c.id == widget.channelId)
-            .firstOrNull
-            ?.isOnline ??
+        final channelIsOnline =
+            state.channels
+                .where((c) => c.id == widget.channelId)
+                .firstOrNull
+                ?.isOnline ??
             false;
         final isOnline = state.isOnline || channelIsOnline;
 
@@ -265,7 +275,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
         //   • messages
         //   • optional pagination loader at the last index (visual top)
         final typingOffset = state.isTyping ? 1 : 0;
-        final itemCount = reversedMessages.length +
+        final itemCount =
+            reversedMessages.length +
             typingOffset +
             (state.isPaginationLoading ? 1 : 0);
 
@@ -279,7 +290,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               backgroundColor: AppColors.appBar,
               leadingWidth: 32,
               leading: IconButton(
-                icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+                icon: const Icon(
+                  Icons.arrow_back,
+                  color: AppColors.textPrimary,
+                ),
                 onPressed: () => context.pop(),
                 padding: EdgeInsets.zero,
               ),
@@ -313,7 +327,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                               const Text(
                                 'recording audio...',
                                 style: TextStyle(
-                                    color: AppColors.accent, fontSize: 12),
+                                  color: AppColors.accent,
+                                  fontSize: 12,
+                                ),
                               ),
                             ],
                           )
@@ -321,13 +337,17 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                           const Text(
                             'typing...',
                             style: TextStyle(
-                                color: AppColors.accent, fontSize: 12),
+                              color: AppColors.accent,
+                              fontSize: 12,
+                            ),
                           )
                         else if (isOnline)
                           const Text(
                             'online',
                             style: TextStyle(
-                                color: AppColors.accent, fontSize: 12),
+                              color: AppColors.accent,
+                              fontSize: 12,
+                            ),
                           )
                         else
                           Text(
@@ -357,54 +377,56 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                     Expanded(
                       child: state.isLoading && messagesForThisChat.isEmpty
                           ? const Center(
-                        child: CircularProgressIndicator(
-                            color: AppColors.accent),
-                      )
-                          : ListView.builder(
-                        controller: _scrollController,
-
-                        // reverse:true keeps the latest messages at the
-                        // visual bottom without any manual scrolling.
-                        reverse: true,
-
-                        padding:
-                        const EdgeInsets.symmetric(vertical: 8),
-                        itemCount: itemCount,
-                        itemBuilder: (context, index) {
-                          // ── Typing indicator (index 0, visual bottom) ──
-                          if (index == 0 && state.isTyping) {
-                            return const TypingIndicator();
-                          }
-
-                          // ── Pagination loader (last index, visual top) ──
-                          final loaderIndex =
-                              typingOffset + reversedMessages.length;
-                          if (state.isPaginationLoading &&
-                              index == loaderIndex) {
-                            return const Padding(
-                              padding: EdgeInsets.symmetric(vertical: 16),
-                              child: Center(
-                                child: SizedBox(
-                                  width: 24,
-                                  height: 24,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: AppColors.accent,
-                                  ),
-                                ),
+                              child: CircularProgressIndicator(
+                                color: AppColors.accent,
                               ),
-                            );
-                          }
+                            )
+                          : ListView.builder(
+                              controller: _scrollController,
 
-                          // ── Message bubble ────────────────────────────
-                          final messageIndex = index - typingOffset;
-                          return MessageBubble(
-                            message: reversedMessages[messageIndex],
-                            reactionsController: _reactionsController,
-                            onReactionChanged: () => setState(() {}),
-                          );
-                        },
-                      ),
+                              // reverse:true keeps the latest messages at the
+                              // visual bottom without any manual scrolling.
+                              reverse: true,
+
+                              padding: const EdgeInsets.symmetric(vertical: 8),
+                              itemCount: itemCount,
+                              itemBuilder: (context, index) {
+                                // ── Typing indicator (index 0, visual bottom) ──
+                                if (index == 0 && state.isTyping) {
+                                  return const TypingIndicator();
+                                }
+
+                                // ── Pagination loader (last index, visual top) ──
+                                final loaderIndex =
+                                    typingOffset + reversedMessages.length;
+                                if (state.isPaginationLoading &&
+                                    index == loaderIndex) {
+                                  return const Padding(
+                                    padding: EdgeInsets.symmetric(vertical: 16),
+                                    child: Center(
+                                      child: SizedBox(
+                                        width: 24,
+                                        height: 24,
+                                        child: CircularProgressIndicator(
+                                          strokeWidth: 2,
+                                          color: AppColors.accent,
+                                        ),
+                                      ),
+                                    ),
+                                  );
+                                }
+
+                                // ── Message bubble ────────────────────────────
+                                final messageIndex = index - typingOffset;
+                                final message = reversedMessages[messageIndex];
+                                return MessageBubble(
+                                  key: ValueKey(message.id),
+                                  message: message,
+                                  reactionsController: _reactionsController,
+                                  onReactionChanged: () => setState(() {}),
+                                );
+                              },
+                            ),
                     ),
 
                     // ── Input bar ─────────────────────────────────────
@@ -412,18 +434,16 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       channelId: widget.channelId,
                       onSend: (text) =>
                           cubit.sendMessage(widget.channelId, text),
-                      onSendAudio: (file, duration) =>
-                          cubit.sendAudioMessage(
-                            widget.channelId,
-                            file.path,
-                            duration,
-                          ),
-                      onSendMedia: (url, isSticker) =>
-                          cubit.sendMediaMessage(
-                            widget.channelId,
-                            url,
-                            isSticker,
-                          ),
+                      onSendAudio: (file, duration) => cubit.sendAudioMessage(
+                        widget.channelId,
+                        file.path,
+                        duration,
+                      ),
+                      onSendMedia: (url, isSticker) => cubit.sendMediaMessage(
+                        widget.channelId,
+                        url,
+                        isSticker,
+                      ),
                       onTypingStart: () =>
                           cubit.sendTypingStart(widget.channelId),
                       onTypingStop: () =>
