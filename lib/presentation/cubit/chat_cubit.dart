@@ -392,12 +392,21 @@ class ChatCubit extends Cubit<ChatState> {
       final effectiveReplyTo = replyToMessageId.isNotEmpty
           ? replyToMessageId
           : state.replyingTo?.id ?? '';
-      final message = await _repository.sendMessage(
+      final replyTarget = _resolveReplyTarget(
+        replyToMessageId: effectiveReplyTo,
+        fallback: state.replyingTo,
+      );
+      final sentMessage = await _repository.sendMessage(
         channelId,
         text.trim(),
         replyToMessageId: effectiveReplyTo,
         isForwarded: isForwarded,
       );
+      final message = _hydrateReplyMetadata(
+        sentMessage,
+        replyTarget: replyTarget,
+      );
+      _repository.addOrUpdateMessage(message);
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(
         state.copyWith(
@@ -412,6 +421,76 @@ class ChatCubit extends Cubit<ChatState> {
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
+  }
+
+  Message? _resolveReplyTarget({
+    required String replyToMessageId,
+    Message? fallback,
+  }) {
+    if (replyToMessageId.isEmpty) return null;
+    if (fallback != null && fallback.id == replyToMessageId) return fallback;
+    return _messageById(replyToMessageId) ?? fallback;
+  }
+
+  Message _hydrateReplyMetadata(
+    Message outgoingMessage, {
+    Message? replyTarget,
+  }) {
+    final replyId = outgoingMessage.replyToMessageId;
+    if (replyId == null || replyId.isEmpty || replyTarget == null) {
+      return outgoingMessage;
+    }
+
+    final hasSender = (outgoingMessage.replyToSenderId ?? '').trim().isNotEmpty;
+    final hasBody = (outgoingMessage.replyToBody ?? '').trim().isNotEmpty;
+    final hasAttachmentType =
+        (outgoingMessage.replyToAttachmentType ?? '').trim().isNotEmpty;
+
+    if (hasSender && (hasBody || hasAttachmentType)) {
+      return outgoingMessage;
+    }
+
+    return outgoingMessage.copyWith(
+      replyToSenderId:
+          hasSender ? outgoingMessage.replyToSenderId : replyTarget.senderId,
+      replyToBody:
+          hasBody ? outgoingMessage.replyToBody : _replyPreviewBody(replyTarget),
+      replyToAttachmentType: hasAttachmentType
+          ? outgoingMessage.replyToAttachmentType
+          : _replyAttachmentType(replyTarget),
+    );
+  }
+
+  String _replyPreviewBody(Message message) {
+    final text = message.text.trim();
+    if (text.isNotEmpty) return text;
+    if (message.isImage) return 'Photo';
+    if (message.isVideo) return 'Video';
+    if (message.isAudio) return 'Voice message';
+    if (message.isDocument) {
+      final fileName = message.documentFileName?.trim();
+      if (fileName != null && fileName.isNotEmpty) return fileName;
+      return 'Document';
+    }
+    if (message.isLocation) {
+      final address = message.locationAddress?.trim();
+      if (address != null && address.isNotEmpty) return address;
+      return 'Location';
+    }
+    if (message.isGif) return 'GIF';
+    if (message.isSticker) return 'Sticker';
+    return '';
+  }
+
+  String _replyAttachmentType(Message message) {
+    if (message.isImage) return 'image';
+    if (message.isVideo) return 'video';
+    if (message.isAudio) return 'voice';
+    if (message.isDocument) return 'document';
+    if (message.isLocation) return 'location';
+    if (message.isGif) return 'gif';
+    if (message.isSticker) return 'sticker';
+    return '';
   }
 
   void startReplyTo(Message message) {
