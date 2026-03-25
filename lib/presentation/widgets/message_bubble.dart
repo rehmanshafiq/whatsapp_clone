@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
@@ -353,8 +354,7 @@ class MessageBubble extends StatelessWidget {
       bubble = _TextMessageBubble(message: message);
     }
 
-    // Wrap child in a GestureDetector so it can trigger MessageActionSheet
-    // We set showContextMenu to false so flutter_chat_reactions only handles reactions if possible
+    // Use simple horizontal swipe to show MessageActionSheet as requested by user.
     return ChatMessageWrapper(
         messageId: message.id,
         controller: reactionsController,
@@ -378,8 +378,11 @@ class MessageBubble extends StatelessWidget {
           onReactionChanged?.call();
         },
         child: GestureDetector(
-          onLongPress: () {
-            MessageActionSheet.show(context, message);
+          onHorizontalDragEnd: (details) {
+            final velocity = details.primaryVelocity ?? 0;
+            if (velocity.abs() > 200) {
+              MessageActionSheet.show(context, message);
+            }
           },
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -400,7 +403,7 @@ class MessageBubble extends StatelessWidget {
             ],
           ),
         ),
-    );
+      );
   }
 }
 

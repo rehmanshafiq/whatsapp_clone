@@ -14,16 +14,20 @@ class MessageActionSheet extends StatelessWidget {
   });
 
   static Future<void> show(BuildContext context, Message message) {
+    final cubit = context.read<ChatCubit>();
     return showModalBottomSheet(
       context: context,
       backgroundColor: AppColors.appBar,
       isScrollControlled: true,
       isDismissible: false,
-      enableDrag: false, // Prevents swipe down to dismiss so 'X' must be used
+      enableDrag: false,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (_) => MessageActionSheet(message: message),
+      builder: (_) => BlocProvider.value(
+        value: cubit,
+        child: MessageActionSheet(message: message),
+      ),
     );
   }
 
@@ -91,13 +95,7 @@ class MessageActionSheet extends StatelessWidget {
                       }
                     },
                   ),
-                  _ActionButton(
-                    icon: Icons.info_outline,
-                    label: 'Info',
-                    onTap: () {
-                      Navigator.pop(context);
-                    },
-                  ),
+
                   _ActionButton(
                     icon: Icons.delete_outline,
                     label: 'Delete',

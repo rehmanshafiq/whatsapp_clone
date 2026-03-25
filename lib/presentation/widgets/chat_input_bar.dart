@@ -238,13 +238,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           Container(
             color: AppColors.scaffold,
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (widget.replyingTo != null) _buildReplyPreview(widget.replyingTo!),
-                _buildInputRow(),
-              ],
-            ),
+            child: _buildInputRow(),
           ),
 
           // Emoji picker panel
@@ -321,65 +315,72 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.fromLTRB(0, 0, 0, 4),
+      margin: const EdgeInsets.only(left: 8, right: 8, top: 8),
+      padding: EdgeInsets.zero,
       decoration: BoxDecoration(
-        color: AppColors.inputBar,
-        borderRadius: BorderRadius.circular(14),
+        color: AppColors.scaffold.withValues(alpha: 0.5),
+        borderRadius: BorderRadius.circular(8),
       ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Container(
-            width: 3,
-            height: 44,
-            margin: const EdgeInsets.fromLTRB(10, 9, 10, 0),
-            decoration: BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.only(top: 8),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    replySender,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.accent,
-                      fontWeight: FontWeight.w600,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    replyText,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
+      child: IntrinsicHeight(
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Container(
+              width: 4,
+              decoration: const BoxDecoration(
+                color: AppColors.accent,
+                borderRadius: BorderRadius.only(
+                  topLeft: Radius.circular(8),
+                  bottomLeft: Radius.circular(8),
+                ),
               ),
             ),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 2, right: 2),
-            child: IconButton(
-              icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
-              onPressed: widget.onCancelReply,
-              splashRadius: 18,
-              visualDensity: VisualDensity.compact,
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(8, 8, 4, 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      replySender,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.accent,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      replyText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
             ),
-          ),
-        ],
+            Align(
+              alignment: Alignment.topRight,
+              child: Padding(
+                padding: const EdgeInsets.only(top: 2, right: 2),
+                child: IconButton(
+                  icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
+                  onPressed: widget.onCancelReply,
+                  splashRadius: 18,
+                  padding: EdgeInsets.zero,
+                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -549,54 +550,61 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
         color: AppColors.inputBar,
         borderRadius: BorderRadius.circular(24),
       ),
-      child: Row(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          IconButton(
-            icon: Icon(
-              _isEmojiVisible
-                  ? Icons.keyboard
-                  : Icons.emoji_emotions_outlined,
-              color: AppColors.iconMuted,
-            ),
-            onPressed: _toggleEmojiPicker,
-          ),
-          Expanded(
-            child: TextField(
-              controller: _controller,
-              focusNode: _textFocusNode,
-              style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 16,
+          if (widget.replyingTo != null) _buildReplyPreview(widget.replyingTo!),
+          Row(
+            children: [
+              IconButton(
+                icon: Icon(
+                  _isEmojiVisible
+                      ? Icons.keyboard
+                      : Icons.emoji_emotions_outlined,
+                  color: AppColors.iconMuted,
+                ),
+                onPressed: _toggleEmojiPicker,
               ),
-              decoration: const InputDecoration(
-                hintText: 'Message',
-                hintStyle: TextStyle(color: AppColors.textSecondary),
-                border: InputBorder.none,
-                contentPadding: EdgeInsets.zero,
-              ),
-              textCapitalization: TextCapitalization.sentences,
-              maxLines: 4,
-              minLines: 1,
-              onSubmitted: (_) => _send(),
-            ),
-          ),
-          IconButton(
-            icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
-            onPressed: () => showAttachmentSheet(context, widget.channelId),
-          ),
-          // Camera icon only visible when no text has been entered
-          if (!_hasText)
-            IconButton(
-              icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
-              onPressed: () {
-                Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                    builder: (_) => CameraScreen(channelId: widget.channelId),
+              Expanded(
+                child: TextField(
+                  controller: _controller,
+                  focusNode: _textFocusNode,
+                  style: const TextStyle(
+                    color: AppColors.textPrimary,
+                    fontSize: 16,
                   ),
-                );
-              },
-            ),
+                  decoration: const InputDecoration(
+                    hintText: 'Message',
+                    hintStyle: TextStyle(color: AppColors.textSecondary),
+                    border: InputBorder.none,
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                  textCapitalization: TextCapitalization.sentences,
+                  maxLines: 4,
+                  minLines: 1,
+                  onSubmitted: (_) => _send(),
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
+                onPressed: () => showAttachmentSheet(context, widget.channelId),
+              ),
+              // Camera icon only visible when no text has been entered
+              if (!_hasText)
+                IconButton(
+                  icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => CameraScreen(channelId: widget.channelId),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
         ],
       ),
     );
