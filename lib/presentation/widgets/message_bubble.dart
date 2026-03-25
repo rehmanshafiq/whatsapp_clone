@@ -1,6 +1,9 @@
 import 'dart:convert';
 import 'dart:async';
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -404,7 +407,6 @@ class MessageBubble extends StatelessWidget {
       bubble = _TextMessageBubble(message: message);
     }
 
-    // Use simple horizontal swipe to show MessageActionSheet as requested by user.
     return ChatMessageWrapper(
       messageId: message.id,
       controller: reactionsController,
@@ -427,17 +429,10 @@ class MessageBubble extends StatelessWidget {
         context.read<ChatCubit>().removeReaction(message.id, reaction);
         onReactionChanged?.call();
       },
-      child: GestureDetector(
-        // Audio bubbles have an internal horizontal drag for waveform seeking.
-        // Keep parent swipe gesture disabled there so seek drag can win.
-        onHorizontalDragEnd: message.isAudio
-            ? null
-            : (details) {
-                final velocity = details.primaryVelocity ?? 0;
-                if (velocity.abs() > 200) {
-                  MessageActionSheet.show(context, message);
-                }
-              },
+      child: _SwipeableMessage(
+        enabled: true,
+        isOutgoing: message.isOutgoing,
+        onSwipeComplete: () => MessageActionSheet.show(context, message),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: message.isOutgoing
@@ -456,6 +451,149 @@ class MessageBubble extends StatelessWidget {
               ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _SwipeableMessage extends StatefulWidget {
+  final bool enabled;
+  final bool isOutgoing;
+  final VoidCallback onSwipeComplete;
+  final Widget child;
+
+  const _SwipeableMessage({
+    required this.enabled,
+    required this.isOutgoing,
+    required this.onSwipeComplete,
+    required this.child,
+  });
+
+  @override
+  State<_SwipeableMessage> createState() => _SwipeableMessageState();
+}
+
+class _SwipeableMessageState extends State<_SwipeableMessage>
+    with SingleTickerProviderStateMixin {
+  static const double _triggerThreshold = 64.0;
+  static const double _maxDrag = 100.0;
+
+  late final AnimationController _controller;
+  double _dragExtent = 0;
+  bool _hapticFired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      lowerBound: 0,
+      upperBound: _maxDrag,
+      value: 0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    if (!widget.enabled) return;
+    _dragExtent += details.delta.dx;
+    _dragExtent = _dragExtent.clamp(0, double.infinity);
+
+    final clamped = math.min(_dragExtent, _maxDrag);
+    _controller.value = clamped;
+
+    if (!_hapticFired && _dragExtent >= _triggerThreshold) {
+      _hapticFired = true;
+      HapticFeedback.mediumImpact();
+    }
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    if (!widget.enabled) return;
+    final triggered = _dragExtent >= _triggerThreshold;
+    _dragExtent = 0;
+    _hapticFired = false;
+
+    final springDesc = SpringDescription(
+      mass: 1,
+      stiffness: 300,
+      damping: 22,
+    );
+    final simulation = SpringSimulation(
+      springDesc,
+      _controller.value,
+      0,
+      details.primaryVelocity ?? 0,
+    );
+    _controller.animateWith(simulation).then((_) {
+      if (triggered && mounted) {
+        widget.onSwipeComplete();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      behavior: HitTestBehavior.translucent,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final dx = _controller.value;
+          final progress = (dx / _triggerThreshold).clamp(0.0, 1.0);
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: widget.isOutgoing ? null : 4,
+                right: widget.isOutgoing ? 4 : null,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: Opacity(
+                    opacity: progress,
+                    child: Transform.scale(
+                      scale: 0.4 + progress * 0.6,
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(
+                            alpha: 0.18 + progress * 0.22,
+                          ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.reply,
+                          size: 18,
+                          color: AppColors.accent.withValues(
+                            alpha: 0.5 + progress * 0.5,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+              Transform.translate(
+                offset: Offset(dx, 0),
+                child: child,
+              ),
+            ],
+          );
+        },
+        child: widget.child,
       ),
     );
   }
