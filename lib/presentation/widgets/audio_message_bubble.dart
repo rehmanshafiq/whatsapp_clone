@@ -10,6 +10,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
 import '../../data/models/message.dart';
+import 'message_action_sheet.dart';
 import 'message_status_icon.dart';
 
 class AudioMessageBubble extends StatefulWidget {
@@ -23,6 +24,7 @@ class AudioMessageBubble extends StatefulWidget {
 
 class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   final AudioPlaybackService _playbackService = getIt<AudioPlaybackService>();
+  static const double _swipeVelocityThreshold = 200;
 
   bool _isPlaying = false;
   Duration _position = Duration.zero;
@@ -211,15 +213,24 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     });
   }
 
-  void _onDragEnd() {
-    if (!_isThisMessage) return;
-    _isSeeking = false;
-    _playbackService.seek(_position);
+  void _onDragEnd(DragEndDetails details) {
+    if (_isThisMessage) {
+      _isSeeking = false;
+      _playbackService.seek(_position);
+      return;
+    }
+    _openActionSheetOnSwipe(details);
   }
 
   void _onDragCancel() {
     if (!_isThisMessage) return;
     _isSeeking = false;
+  }
+
+  void _openActionSheetOnSwipe(DragEndDetails details) {
+    final velocity = details.primaryVelocity ?? 0;
+    if (velocity.abs() < _swipeVelocityThreshold) return;
+    MessageActionSheet.show(context, widget.message);
   }
 
   void _onTapSeek(double fraction) {
@@ -273,107 +284,111 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-          minWidth: 220,
-        ),
-        margin: EdgeInsets.only(
-          left: isOutgoing ? 64 : 8,
-          right: isOutgoing ? 8 : 64,
-          top: 2,
-          bottom: 2,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          color: isOutgoing
-              ? AppColors.outgoingBubble
-              : AppColors.incomingBubble,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
-            bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onHorizontalDragEnd: _isThisMessage ? null : _openActionSheetOnSwipe,
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: MediaQuery.of(context).size.width * 0.75,
+            minWidth: 220,
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _PlayPauseButton(
-              isPlaying: _isPlaying,
-              onTap: _togglePlayback,
-              isOutgoing: isOutgoing,
+          margin: EdgeInsets.only(
+            left: isOutgoing ? 64 : 8,
+            right: isOutgoing ? 8 : 64,
+            top: 2,
+            bottom: 2,
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+          decoration: BoxDecoration(
+            color: isOutgoing
+                ? AppColors.outgoingBubble
+                : AppColors.incomingBubble,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(12),
+              topRight: const Radius.circular(12),
+              bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+              bottomRight: Radius.circular(isOutgoing ? 0 : 12),
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SeekableWaveformBar(
-                    progress: progress,
-                    isOutgoing: isOutgoing,
-                    onTapSeek: _onTapSeek,
-                    onDragStart: _onDragStart,
-                    onDragUpdate: _onDragUpdate,
-                    onDragEnd: _onDragEnd,
-                    onDragCancel: _onDragCancel,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _isPlaying || _isThisMessage
-                                ? _formatDuration(_position)
-                                : _formatDuration(_totalDuration),
-                            style: TextStyle(
-                              color: AppColors.textSecondary.withValues(
-                                alpha: 0.8,
-                              ),
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (_isThisMessage) ...[
-                            const SizedBox(width: 6),
-                            _SpeedButton(
-                              speed: _playbackSpeed,
-                              onTap: _cycleSpeed,
-                              isOutgoing: isOutgoing,
-                            ),
-                          ],
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            time,
-                            style: TextStyle(
-                              color: AppColors.textSecondary.withValues(
-                                alpha: 0.7,
-                              ),
-                              fontSize: 11,
-                            ),
-                          ),
-                          if (isOutgoing) ...[
-                            const SizedBox(width: 4),
-                            MessageStatusIcon(
-                              status: widget.message.status,
-                              size: 14,
-                            ),
-                          ],
-                        ],
-                      ),
-                    ],
-                  ),
-                ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PlayPauseButton(
+                isPlaying: _isPlaying,
+                onTap: _togglePlayback,
+                isOutgoing: isOutgoing,
               ),
-            ),
-          ],
+              const SizedBox(width: 8),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _SeekableWaveformBar(
+                      progress: progress,
+                      isOutgoing: isOutgoing,
+                      onTapSeek: _onTapSeek,
+                      onDragStart: _onDragStart,
+                      onDragUpdate: _onDragUpdate,
+                      onDragEnd: _onDragEnd,
+                      onDragCancel: _onDragCancel,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _isPlaying || _isThisMessage
+                                  ? _formatDuration(_position)
+                                  : _formatDuration(_totalDuration),
+                              style: TextStyle(
+                                color: AppColors.textSecondary.withValues(
+                                  alpha: 0.8,
+                                ),
+                                fontSize: 11,
+                              ),
+                            ),
+                            if (_isThisMessage) ...[
+                              const SizedBox(width: 6),
+                              _SpeedButton(
+                                speed: _playbackSpeed,
+                                onTap: _cycleSpeed,
+                                isOutgoing: isOutgoing,
+                              ),
+                            ],
+                          ],
+                        ),
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              time,
+                              style: TextStyle(
+                                color: AppColors.textSecondary.withValues(
+                                  alpha: 0.7,
+                                ),
+                                fontSize: 11,
+                              ),
+                            ),
+                            if (isOutgoing) ...[
+                              const SizedBox(width: 4),
+                              MessageStatusIcon(
+                                status: widget.message.status,
+                                size: 14,
+                              ),
+                            ],
+                          ],
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -461,7 +476,7 @@ class _SeekableWaveformBar extends StatelessWidget {
   final ValueChanged<double> onTapSeek;
   final VoidCallback onDragStart;
   final ValueChanged<double> onDragUpdate;
-  final VoidCallback onDragEnd;
+  final ValueChanged<DragEndDetails> onDragEnd;
   final VoidCallback onDragCancel;
 
   const _SeekableWaveformBar({
@@ -500,7 +515,7 @@ class _SeekableWaveformBar extends StatelessWidget {
           onHorizontalDragUpdate: (details) {
             onDragUpdate(fractionFromX(details.localPosition.dx));
           },
-          onHorizontalDragEnd: (_) => onDragEnd(),
+          onHorizontalDragEnd: onDragEnd,
           onHorizontalDragCancel: onDragCancel,
           child: CustomPaint(
             size: Size(constraints.maxWidth, 28),
