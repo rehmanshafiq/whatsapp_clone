@@ -190,6 +190,43 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return 'last seen $timeStr';
   }
 
+  DateTime _toLocalDateOnly(DateTime dateTime) {
+    final local = dateTime.isUtc ? dateTime.toLocal() : dateTime;
+    return DateTime(local.year, local.month, local.day);
+  }
+
+  bool _isSameDay(DateTime a, DateTime b) =>
+      a.year == b.year && a.month == b.month && a.day == b.day;
+
+  String _monthName(int month) {
+    const months = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return months[month - 1];
+  }
+
+  String _formatMessageDateLabel(DateTime timestamp) {
+    final date = _toLocalDateOnly(timestamp);
+    final today = _toLocalDateOnly(DateTime.now());
+    final yesterday = today.subtract(const Duration(days: 1));
+
+    if (_isSameDay(date, today)) return 'Today';
+    if (_isSameDay(date, yesterday)) return 'Yesterday';
+
+    return '${date.day} ${_monthName(date.month)} ${date.year}';
+  }
+
   // ------------------------------------------------------------------
   // Build
   // ------------------------------------------------------------------
@@ -419,11 +456,61 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 // ── Message bubble ────────────────────────────
                                 final messageIndex = index - typingOffset;
                                 final message = reversedMessages[messageIndex];
-                                return MessageBubble(
-                                  key: ValueKey(message.id),
-                                  message: message,
-                                  reactionsController: _reactionsController,
-                                  onReactionChanged: () => setState(() {}),
+                                final currentDay = _toLocalDateOnly(
+                                  message.timestamp,
+                                );
+                                final nextMessage =
+                                    messageIndex < reversedMessages.length - 1
+                                    ? reversedMessages[messageIndex + 1]
+                                    : null;
+                                final nextDay = nextMessage == null
+                                    ? null
+                                    : _toLocalDateOnly(nextMessage.timestamp);
+                                final shouldShowDateHeader =
+                                    nextDay == null ||
+                                    !_isSameDay(currentDay, nextDay);
+
+                                return Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    if (shouldShowDateHeader)
+                                      Padding(
+                                        padding: const EdgeInsets.symmetric(
+                                          vertical: 8,
+                                        ),
+                                        child: Center(
+                                          child: Container(
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 10,
+                                              vertical: 4,
+                                            ),
+                                            decoration: BoxDecoration(
+                                              color: AppColors.appBar.withValues(
+                                                alpha: 0.85,
+                                              ),
+                                              borderRadius:
+                                                  BorderRadius.circular(10),
+                                            ),
+                                            child: Text(
+                                              _formatMessageDateLabel(
+                                                message.timestamp,
+                                              ),
+                                              style: const TextStyle(
+                                                color: AppColors.textSecondary,
+                                                fontSize: 12,
+                                                fontWeight: FontWeight.w500,
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    MessageBubble(
+                                      key: ValueKey(message.id),
+                                      message: message,
+                                      reactionsController: _reactionsController,
+                                      onReactionChanged: () => setState(() {}),
+                                    ),
+                                  ],
                                 );
                               },
                             ),
