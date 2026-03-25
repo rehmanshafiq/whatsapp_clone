@@ -69,8 +69,9 @@ class ChatRepository {
         );
       }
 
-      final profile =
-          await _remoteDataSource.fetchCurrentUserProfile(token: token);
+      final profile = await _remoteDataSource.fetchCurrentUserProfile(
+        token: token,
+      );
       _cachedCurrentUserProfile = profile;
       return profile;
     } on ApiException {
@@ -103,11 +104,13 @@ class ChatRepository {
       final filtered = blockedIds.isEmpty
           ? remoteChats
           : remoteChats
-              .where((c) =>
-                  c.peerUserId == null ||
-                  c.peerUserId!.isEmpty ||
-                  !blockedIds.contains(c.peerUserId))
-              .toList();
+                .where(
+                  (c) =>
+                      c.peerUserId == null ||
+                      c.peerUserId!.isEmpty ||
+                      !blockedIds.contains(c.peerUserId),
+                )
+                .toList();
 
       _storageService.saveChats(filtered);
       return filtered;
@@ -131,12 +134,16 @@ class ChatRepository {
           statusCode: 401,
         );
       }
-      final page =
-          await _remoteDataSource.fetchMessages(channelId, token: token, limit: limit);
+      final page = await _remoteDataSource.fetchMessages(
+        channelId,
+        token: token,
+        limit: limit,
+      );
       var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       final existingById = <String, Message>{
-        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+        for (final m in allMessages.where((m) => m.channelId == channelId))
+          m.id: m,
       };
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -183,7 +190,9 @@ class ChatRepository {
       var normalized = _normalizeMessageSenderIds(page.messages);
       // Merge into storage: older messages go to the front of the channel's list
       final allMessages = _storageService.getMessages();
-      final existing = allMessages.where((m) => m.channelId == channelId).toList();
+      final existing = allMessages
+          .where((m) => m.channelId == channelId)
+          .toList();
       final existingById = <String, Message>{for (final m in existing) m.id: m};
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -216,10 +225,11 @@ class ChatRepository {
     final myId = _storageService.getUserId();
     if (myId == null || myId.isEmpty) return messages;
     return messages
-        .map((m) =>
-            m.senderId == myId
-                ? m.copyWith(senderId: AppConstants.currentUserId)
-                : m)
+        .map(
+          (m) => m.senderId == myId
+              ? m.copyWith(senderId: AppConstants.currentUserId)
+              : m,
+        )
         .toList();
   }
 
@@ -259,7 +269,8 @@ class ChatRepository {
       var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       final existingById = <String, Message>{
-        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+        for (final m in allMessages.where((m) => m.channelId == channelId))
+          m.id: m,
       };
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -804,10 +815,11 @@ class ChatRepository {
     if (idx >= 0) {
       final msg = allMessages[idx];
       // Message is unread if it is incoming and status is not seen (or read)
-      final isUnreadIncoming = !msg.isOutgoing && msg.status != MessageStatus.seen;
-      
+      final isUnreadIncoming =
+          !msg.isOutgoing && msg.status != MessageStatus.seen;
+
       allMessages[idx] = msg.copyWith(
-        text: 'This message was deleted',
+        text: 'message deleted',
         type: MessageType.text,
         audioPath: null,
         mediaUrl: null,
@@ -819,6 +831,11 @@ class ChatRepository {
         locationName: null,
         contactName: null,
         contactPhone: null,
+        replyToMessageId: '',
+        replyToSenderId: '',
+        replyToBody: '',
+        replyToAttachmentType: '',
+        isEdited: false,
       );
       _storageService.saveMessages(allMessages);
 
@@ -826,14 +843,22 @@ class ChatRepository {
         final chats = _storageService.getChats();
         final chatIdx = chats.indexWhere((c) => c.id == conversationId);
         if (chatIdx >= 0 && chats[chatIdx].unreadCount > 0) {
-          chats[chatIdx] = chats[chatIdx].copyWith(unreadCount: chats[chatIdx].unreadCount - 1);
+          chats[chatIdx] = chats[chatIdx].copyWith(
+            unreadCount: chats[chatIdx].unreadCount - 1,
+          );
           _storageService.saveChats(chats);
         }
       }
     }
   }
 
-  void handleMessageEditedLocally(String messageId, String conversationId, String newBody, bool isEdited, DateTime? editedAt) {
+  void handleMessageEditedLocally(
+    String messageId,
+    String conversationId,
+    String newBody,
+    bool isEdited,
+    DateTime? editedAt,
+  ) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == messageId);
     if (idx >= 0) {

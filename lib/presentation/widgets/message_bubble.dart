@@ -19,17 +19,68 @@ import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
 import 'message_action_sheet.dart';
 
-/// Display text for message body. "message deleted" -> "This message was deleted".
-String _messageDisplayText(String body) =>
-    body == 'message deleted' ? 'This message was deleted' : body;
+/// Canonical body marker for soft-deleted messages.
+const String _deletedMessageMarker = 'message deleted';
 
-/// True when body indicates a deleted message (show in italic).
-bool _isDeletedMessage(String body) => body == 'message deleted';
+/// True when body indicates a deleted message (accept legacy display text too).
+bool _isDeletedMessage(String body) {
+  final normalized = body.trim().toLowerCase();
+  return normalized == _deletedMessageMarker ||
+      normalized == 'this message was deleted';
+}
+
+/// Display text for message body. Keep one user-facing phrase.
+String _messageDisplayText(String body) =>
+    _isDeletedMessage(body) ? 'This message was deleted' : body;
+
+/// Renders normal message text, or a WhatsApp-like deleted-message row.
+Widget _buildMessageBodyText(
+  String body, {
+  required TextStyle normalStyle,
+  Color? deletedColor,
+}) {
+  final displayText = _messageDisplayText(body);
+  if (!_isDeletedMessage(body)) {
+    return Text(displayText, style: normalStyle);
+  }
+
+  final effectiveDeletedColor =
+      (deletedColor ?? normalStyle.color ?? AppColors.textSecondary).withValues(
+        alpha: 0.85,
+      );
+  final deletedStyle = normalStyle.copyWith(
+    color: effectiveDeletedColor,
+    fontStyle: FontStyle.italic,
+  );
+  final iconSize = (deletedStyle.fontSize ?? 15) - 1;
+
+  return Text.rich(
+    TextSpan(
+      children: [
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Icon(
+              Icons.block,
+              size: iconSize < 12 ? 12 : iconSize,
+              color: effectiveDeletedColor,
+            ),
+          ),
+        ),
+        TextSpan(text: displayText),
+      ],
+    ),
+    style: deletedStyle,
+  );
+}
 
 /// View-once image is considered expired 60 seconds after opening.
 bool _isViewOnceExpired(DateTime? viewOnceOpenedAt) {
   if (viewOnceOpenedAt == null) return false;
-  return viewOnceOpenedAt.add(const Duration(seconds: 60)).isBefore(DateTime.now());
+  return viewOnceOpenedAt
+      .add(const Duration(seconds: 60))
+      .isBefore(DateTime.now());
 }
 
 /// Backend may return server-relative media URLs like `/uploads/...`.
@@ -118,10 +169,7 @@ Widget _buildMediaContent(
             const SizedBox(height: 6),
             Text(
               'View once photo',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ],
         ),
@@ -130,9 +178,7 @@ Widget _buildMediaContent(
   }
 
   // View-once: recipient not opened -> tap to view placeholder
-  if (message.isViewOnce &&
-      !isOutgoing &&
-      message.viewOnceOpenedAt == null) {
+  if (message.isViewOnce && !isOutgoing && message.viewOnceOpenedAt == null) {
     return GestureDetector(
       onTap: () => context.read<ChatCubit>().openViewOnceMessage(message.id),
       child: Container(
@@ -145,18 +191,11 @@ Widget _buildMediaContent(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(
-              Icons.visibility,
-              color: AppColors.textSecondary,
-              size: 40,
-            ),
+            Icon(Icons.visibility, color: AppColors.textSecondary, size: 40),
             const SizedBox(height: 8),
             Text(
               'Tap to view',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
             Text(
               'View once photo',
@@ -172,7 +211,8 @@ Widget _buildMediaContent(
   }
 
   // View-once: recipient opened, not expired, and we have local file (fetched with auth)
-  final viewOnceLocalPath = message.isViewOnce &&
+  final viewOnceLocalPath =
+      message.isViewOnce &&
           !isOutgoing &&
           message.viewOnceOpenedAt != null &&
           !_isViewOnceExpired(message.viewOnceOpenedAt)
@@ -195,7 +235,9 @@ Widget _buildMediaContent(
       !isOutgoing &&
       message.viewOnceOpenedAt != null &&
       _isViewOnceExpired(message.viewOnceOpenedAt)) {
-    const expiredMutedColor = Color(0xFFA89888); // Muted light-tan for icon & text
+    const expiredMutedColor = Color(
+      0xFFA89888,
+    ); // Muted light-tan for icon & text
     return Container(
       width: isSticker ? stickerSize : placeholderSize,
       height: isSticker ? stickerSize : placeholderSize,
@@ -239,9 +281,7 @@ Widget _buildMediaContent(
   }
 
   // View-once: sender — recipient has opened → show "Opened" (WhatsApp-style)
-  if (message.isViewOnce &&
-      isOutgoing &&
-      message.viewOnceOpenedAt != null) {
+  if (message.isViewOnce && isOutgoing && message.viewOnceOpenedAt != null) {
     return Container(
       width: isSticker ? stickerSize : placeholderSize,
       height: isSticker ? stickerSize : placeholderSize,
@@ -276,7 +316,8 @@ Widget _buildMediaContent(
 
   // Show image (view-once sender not yet opened, or opened recipient within 60s, or normal image)
   if (message.mediaUrl != null) {
-    final isOurApiUrl = resolvedMediaUrl != null &&
+    final isOurApiUrl =
+        resolvedMediaUrl != null &&
         resolvedMediaUrl.startsWith('http') &&
         resolvedMediaUrl.contains(AppConstants.apiBaseUrl);
     final httpHeaders = isOurApiUrl
@@ -356,58 +397,56 @@ class MessageBubble extends StatelessWidget {
 
     // Use simple horizontal swipe to show MessageActionSheet as requested by user.
     return ChatMessageWrapper(
-        messageId: message.id,
-        controller: reactionsController,
-        alignment: message.isOutgoing
-            ? Alignment.centerRight
-            : Alignment.centerLeft,
-        config: const ChatReactionsConfig(
-          availableReactions: ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
-          enableHapticFeedback: true,
-          showContextMenu: false,
-          dialogBackgroundColor: AppColors.appBar,
-        ),
-        onReactionAdded: (reaction) {
-          reactionsController.addReaction(message.id, reaction);
-          context.read<ChatCubit>().reactToMessage(message.id, reaction);
-          onReactionChanged?.call();
+      messageId: message.id,
+      controller: reactionsController,
+      alignment: message.isOutgoing
+          ? Alignment.centerRight
+          : Alignment.centerLeft,
+      config: const ChatReactionsConfig(
+        availableReactions: ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
+        enableHapticFeedback: true,
+        showContextMenu: false,
+        dialogBackgroundColor: AppColors.appBar,
+      ),
+      onReactionAdded: (reaction) {
+        reactionsController.addReaction(message.id, reaction);
+        context.read<ChatCubit>().reactToMessage(message.id, reaction);
+        onReactionChanged?.call();
+      },
+      onReactionRemoved: (reaction) {
+        reactionsController.removeReaction(message.id, reaction);
+        context.read<ChatCubit>().removeReaction(message.id, reaction);
+        onReactionChanged?.call();
+      },
+      child: GestureDetector(
+        onHorizontalDragEnd: (details) {
+          final velocity = details.primaryVelocity ?? 0;
+          if (velocity.abs() > 200) {
+            MessageActionSheet.show(context, message);
+          }
         },
-        onReactionRemoved: (reaction) {
-          reactionsController.removeReaction(message.id, reaction);
-          context.read<ChatCubit>().removeReaction(message.id, reaction);
-          onReactionChanged?.call();
-        },
-        child: GestureDetector(
-          onHorizontalDragEnd: (details) {
-            final velocity = details.primaryVelocity ?? 0;
-            if (velocity.abs() > 200) {
-              MessageActionSheet.show(context, message);
-            }
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: message.isOutgoing
-                ? CrossAxisAlignment.end
-                : CrossAxisAlignment.start,
-            children: [
-              bubble,
-              if (message.reactions.isNotEmpty)
-                Padding(
-                  padding: EdgeInsets.only(
-                    left: message.isOutgoing ? 64 : 8,
-                    right: message.isOutgoing ? 8 : 64,
-                    top: 2,
-                  ),
-                  child: _ReactionRow(reactions: message.reactions),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: message.isOutgoing
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            bubble,
+            if (message.reactions.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(
+                  left: message.isOutgoing ? 64 : 8,
+                  right: message.isOutgoing ? 8 : 64,
+                  top: 2,
                 ),
-            ],
-          ),
+                child: _ReactionRow(reactions: message.reactions),
+              ),
+          ],
         ),
-      );
+      ),
+    );
   }
 }
-
-
 
 class _ContactMessageBubble extends StatelessWidget {
   final Message message;
@@ -704,16 +743,14 @@ class _LocationMessageWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     final bubble = LocationMessageBubble(message: message);
     if (message.replyToMessageId == null) {
-      return GestureDetector(
-        onTap: () => _openInMaps(context),
-        child: bubble,
-      );
+      return GestureDetector(onTap: () => _openInMaps(context), child: bubble);
     }
     return GestureDetector(
       onTap: () => _openInMaps(context),
       child: Align(
-        alignment:
-            message.isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: message.isOutgoing
+            ? Alignment.centerRight
+            : Alignment.centerLeft,
         child: Container(
           margin: EdgeInsets.only(
             left: message.isOutgoing ? 64 : 8,
@@ -859,13 +896,18 @@ class _ReplyPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final cubit = context.read<ChatCubit>();
     final myBackendId = cubit.repository.getCurrentUserId();
-    final isMe = senderId == AppConstants.currentUserId ||
-        (myBackendId != null && myBackendId.isNotEmpty && senderId == myBackendId);
+    final isMe =
+        senderId == AppConstants.currentUserId ||
+        (myBackendId != null &&
+            myBackendId.isNotEmpty &&
+            senderId == myBackendId);
     final String name;
     if (isMe) {
       name = 'You';
     } else if (senderId == null || senderId!.isEmpty) {
-      name = isOutgoing ? 'You' : (cubit.state.selectedChannel?.name ?? 'Unknown');
+      name = isOutgoing
+          ? 'You'
+          : (cubit.state.selectedChannel?.name ?? 'Unknown');
     } else {
       name = cubit.state.selectedChannel?.name ?? senderId!;
     }
@@ -951,6 +993,7 @@ class _TextMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOutgoing = message.isOutgoing;
+    final isDeletedMessage = _isDeletedMessage(message.text);
     final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
     final hourRaw = message.timestamp.hour % 12;
     final time =
@@ -984,23 +1027,23 @@ class _TextMessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (message.replyToMessageId != null)
+            if (!isDeletedMessage &&
+                message.replyToMessageId != null &&
+                message.replyToMessageId!.isNotEmpty)
               _ReplyPreview(
                 senderId: message.replyToSenderId,
                 previewText: message.replyToBody,
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
               ),
-            Text(
-              _messageDisplayText(message.text),
-              style: TextStyle(
+            _buildMessageBodyText(
+              message.text,
+              normalStyle: const TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 15,
                 height: 1.3,
-                fontStyle: _isDeletedMessage(message.text)
-                    ? FontStyle.italic
-                    : FontStyle.normal,
               ),
+              deletedColor: AppColors.textSecondary,
             ),
             const SizedBox(height: 2),
             Row(
@@ -1105,16 +1148,14 @@ class _MediaMessageBubble extends StatelessWidget {
                 message.text != '\u{1F4F7} Photo')
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-                child: Text(
-                  _messageDisplayText(message.text),
-                  style: TextStyle(
+                child: _buildMessageBodyText(
+                  message.text,
+                  normalStyle: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
                     height: 1.3,
-                    fontStyle: _isDeletedMessage(message.text)
-                        ? FontStyle.italic
-                        : FontStyle.normal,
                   ),
+                  deletedColor: AppColors.textSecondary,
                 ),
               ),
             if (!isSticker) const SizedBox(height: 2),
@@ -1289,15 +1330,13 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
             if (widget.message.text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-                child: Text(
-                  _messageDisplayText(widget.message.text),
-                  style: TextStyle(
+                child: _buildMessageBodyText(
+                  widget.message.text,
+                  normalStyle: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
-                    fontStyle: _isDeletedMessage(widget.message.text)
-                        ? FontStyle.italic
-                        : FontStyle.normal,
                   ),
+                  deletedColor: AppColors.textSecondary,
                 ),
               ),
             const SizedBox(height: 2),
