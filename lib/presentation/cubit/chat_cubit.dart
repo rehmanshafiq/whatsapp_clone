@@ -1508,6 +1508,28 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Immediately transitions a view-once message to the expired state by
+  /// setting viewOnceOpenedAt far enough in the past. Called when the user
+  /// navigates back from the full-screen view-once viewer.
+  void expireViewOnceMessage(String messageId) {
+    final messages = state.messages;
+    final idx = messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    final message = messages[idx];
+    if (!message.isViewOnce || message.isOutgoing) return;
+
+    final expiredAt = DateTime.now().subtract(const Duration(minutes: 5));
+    final updated = message.copyWith(viewOnceOpenedAt: expiredAt);
+    _repository.addOrUpdateMessage(updated);
+
+    final updatedMessages = List<Message>.from(messages)..[idx] = updated;
+    final paths = Map<String, String>.from(state.viewOnceLocalPaths)
+      ..remove(messageId);
+    emit(
+      state.copyWith(messages: updatedMessages, viewOnceLocalPaths: paths),
+    );
+  }
+
   Future<void> sendVideoMessage(
     String channelId,
     String videoPath, {

@@ -13,6 +13,7 @@ import '../../core/theme/app_theme.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
+import '../screens/media_viewer_screen.dart';
 import 'audio_message_bubble.dart';
 import 'document_message_bubble.dart';
 import 'location_message_bubble.dart';
@@ -79,7 +80,7 @@ Widget _buildMessageBodyText(
 bool _isViewOnceExpired(DateTime? viewOnceOpenedAt) {
   if (viewOnceOpenedAt == null) return false;
   return viewOnceOpenedAt
-      .add(const Duration(seconds: 60))
+      .add(const Duration(seconds: 2))
       .isBefore(DateTime.now());
 }
 
@@ -179,34 +180,11 @@ Widget _buildMediaContent(
 
   // View-once: recipient not opened -> tap to view placeholder
   if (message.isViewOnce && !isOutgoing && message.viewOnceOpenedAt == null) {
-    return GestureDetector(
-      onTap: () => context.read<ChatCubit>().openViewOnceMessage(message.id),
-      child: Container(
-        width: isSticker ? stickerSize : placeholderSize,
-        height: isSticker ? stickerSize : placeholderSize,
-        decoration: BoxDecoration(
-          color: AppColors.appBar,
-          borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(Icons.visibility, color: AppColors.textSecondary, size: 40),
-            const SizedBox(height: 8),
-            Text(
-              'Tap to view',
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
-            ),
-            Text(
-              'View once photo',
-              style: TextStyle(
-                color: AppColors.textSecondary.withValues(alpha: 0.7),
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-      ),
+    return _ViewOnceTapToView(
+      message: message,
+      isSticker: isSticker,
+      placeholderSize: placeholderSize,
+      stickerSize: stickerSize,
     );
   }
 
@@ -219,13 +197,25 @@ Widget _buildMediaContent(
       ? context.read<ChatCubit>().state.viewOnceLocalPaths[message.id]
       : null;
   if (viewOnceLocalPath != null) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-      child: Image.file(
-        File(viewOnceLocalPath),
-        width: isSticker ? stickerSize : null,
-        height: isSticker ? stickerSize : null,
-        fit: isSticker ? BoxFit.contain : BoxFit.cover,
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MediaViewerScreen(
+              localFilePath: viewOnceLocalPath,
+              isViewOnce: true,
+            ),
+          ),
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+        child: Image.file(
+          File(viewOnceLocalPath),
+          width: isSticker ? stickerSize : null,
+          height: isSticker ? stickerSize : null,
+          fit: isSticker ? BoxFit.contain : BoxFit.cover,
+        ),
       ),
     );
   }
@@ -324,7 +314,7 @@ Widget _buildMediaContent(
         ? context.read<ChatCubit>().authHeadersForMedia
         : null;
 
-    return ClipRRect(
+    final imageWidget = ClipRRect(
       borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
       child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
           ? CachedNetworkImage(
@@ -354,6 +344,25 @@ Widget _buildMediaContent(
               height: isSticker ? stickerSize : null,
               fit: isSticker ? BoxFit.contain : BoxFit.cover,
             ),
+    );
+
+    if (isSticker || message.isViewOnce) return imageWidget;
+
+    return GestureDetector(
+      onTap: () {
+        final isLocal = resolvedMediaUrl == null ||
+            !resolvedMediaUrl.startsWith('http');
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MediaViewerScreen(
+              networkUrl: isLocal ? null : resolvedMediaUrl,
+              localFilePath: isLocal ? message.mediaUrl : null,
+              httpHeaders: httpHeaders,
+            ),
+          ),
+        );
+      },
+      child: imageWidget,
     );
   }
 
@@ -1289,47 +1298,53 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                 attachmentType: widget.message.replyToAttachmentType,
                 isOutgoing: widget.message.isOutgoing,
               ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _error
-                  ? Container(
-                      height: 200,
-                      color: Colors.black12,
-                      child: const Center(child: Icon(Icons.error_outline)),
-                    )
-                  : _initialized
-                  ? Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        AspectRatio(
-                          aspectRatio: _controller!.value.aspectRatio,
-                          child: VideoPlayer(_controller!),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _controller!.value.isPlaying
-                                  ? _controller!.pause()
-                                  : _controller!.play();
-                            });
-                          },
-                          child: CircleAvatar(
+            GestureDetector(
+              onTap: () {
+                if (!_initialized || _error) return;
+                _controller?.pause();
+                final url = _resolveMediaUrl(widget.message.mediaUrl);
+                final isLocal = url != null && !url.startsWith('http');
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MediaViewerScreen(
+                      networkUrl: isLocal ? null : url,
+                      localFilePath: isLocal ? url : null,
+                      isVideo: true,
+                    ),
+                  ),
+                );
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _error
+                    ? Container(
+                        height: 200,
+                        color: Colors.black12,
+                        child: const Center(child: Icon(Icons.error_outline)),
+                      )
+                    : _initialized
+                    ? Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          AspectRatio(
+                            aspectRatio: _controller!.value.aspectRatio,
+                            child: VideoPlayer(_controller!),
+                          ),
+                          const CircleAvatar(
                             backgroundColor: Colors.black45,
                             child: Icon(
-                              _controller!.value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
+                              Icons.play_arrow,
                               color: Colors.white,
                             ),
                           ),
-                        ),
-                      ],
-                    )
-                  : Container(
-                      height: 200,
-                      color: Colors.black12,
-                      child: const Center(child: CircularProgressIndicator()),
-                    ),
+                        ],
+                      )
+                    : Container(
+                        height: 200,
+                        color: Colors.black12,
+                        child: const Center(child: CircularProgressIndicator()),
+                      ),
+              ),
             ),
             if (widget.message.text.isNotEmpty)
               Padding(
@@ -1373,6 +1388,104 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ViewOnceTapToView extends StatefulWidget {
+  final Message message;
+  final bool isSticker;
+  final double placeholderSize;
+  final double stickerSize;
+
+  const _ViewOnceTapToView({
+    required this.message,
+    required this.isSticker,
+    required this.placeholderSize,
+    required this.stickerSize,
+  });
+
+  @override
+  State<_ViewOnceTapToView> createState() => _ViewOnceTapToViewState();
+}
+
+class _ViewOnceTapToViewState extends State<_ViewOnceTapToView> {
+  bool _opening = false;
+
+  Future<void> _openAndView() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+
+    final cubit = context.read<ChatCubit>();
+    await cubit.openViewOnceMessage(widget.message.id);
+
+    if (!mounted) return;
+
+    final localPath = cubit.state.viewOnceLocalPaths[widget.message.id];
+    if (localPath == null) {
+      setState(() => _opening = false);
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MediaViewerScreen(
+          localFilePath: localPath,
+          isViewOnce: true,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    cubit.expireViewOnceMessage(widget.message.id);
+    setState(() => _opening = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.isSticker ? widget.stickerSize : widget.placeholderSize;
+    return GestureDetector(
+      onTap: _openAndView,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: AppColors.appBar,
+          borderRadius: BorderRadius.circular(widget.isSticker ? 0 : 8),
+        ),
+        child: _opening
+            ? const Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.accent,
+                ),
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.visibility,
+                    color: AppColors.textSecondary,
+                    size: 40,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tap to view',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    'View once photo',
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }
