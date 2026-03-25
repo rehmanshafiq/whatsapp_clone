@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -430,7 +431,7 @@ class MessageBubble extends StatelessWidget {
         onReactionChanged?.call();
       },
       child: _SwipeableMessage(
-        enabled: true,
+        enabled: !message.isAudio,
         isOutgoing: message.isOutgoing,
         onSwipeComplete: () => MessageActionSheet.show(context, message),
         child: Column(
@@ -500,12 +501,9 @@ class _SwipeableMessageState extends State<_SwipeableMessage>
   }
 
   void _onDragUpdate(DragUpdateDetails details) {
-    if (!widget.enabled) return;
-    _dragExtent += details.delta.dx;
-    _dragExtent = _dragExtent.clamp(0, double.infinity);
-
-    final clamped = math.min(_dragExtent, _maxDrag);
-    _controller.value = clamped;
+    final dx = details.delta.dx;
+    _dragExtent = (_dragExtent + dx).clamp(0.0, double.infinity);
+    _controller.value = math.min(_dragExtent, _maxDrag);
 
     if (!_hapticFired && _dragExtent >= _triggerThreshold) {
       _hapticFired = true;
@@ -514,22 +512,25 @@ class _SwipeableMessageState extends State<_SwipeableMessage>
   }
 
   void _onDragEnd(DragEndDetails details) {
-    if (!widget.enabled) return;
+    _finishSwipe();
+  }
+
+  void _onDragCancel() {
+    _finishSwipe();
+  }
+
+  void _finishSwipe() {
     final triggered = _dragExtent >= _triggerThreshold;
     _dragExtent = 0;
     _hapticFired = false;
 
-    final springDesc = SpringDescription(
-      mass: 1,
-      stiffness: 300,
-      damping: 22,
-    );
-    final simulation = SpringSimulation(
-      springDesc,
-      _controller.value,
-      0,
-      details.primaryVelocity ?? 0,
-    );
+    if (_controller.value == 0) {
+      if (triggered && mounted) widget.onSwipeComplete();
+      return;
+    }
+
+    final springDesc = SpringDescription(mass: 1, stiffness: 300, damping: 22);
+    final simulation = SpringSimulation(springDesc, _controller.value, 0, 0);
     _controller.animateWith(simulation).then((_) {
       if (triggered && mounted) {
         widget.onSwipeComplete();
@@ -544,7 +545,7 @@ class _SwipeableMessageState extends State<_SwipeableMessage>
     return GestureDetector(
       onHorizontalDragUpdate: _onDragUpdate,
       onHorizontalDragEnd: _onDragEnd,
-      behavior: HitTestBehavior.translucent,
+      onHorizontalDragCancel: _onDragCancel,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {

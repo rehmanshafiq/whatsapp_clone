@@ -1,8 +1,11 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../../core/di/service_locator.dart';
@@ -10,6 +13,7 @@ import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
 import '../../data/models/message.dart';
+import 'message_action_sheet.dart';
 import 'message_status_icon.dart';
 
 class AudioMessageBubble extends StatefulWidget {
@@ -21,7 +25,8 @@ class AudioMessageBubble extends StatefulWidget {
   State<AudioMessageBubble> createState() => _AudioMessageBubbleState();
 }
 
-class _AudioMessageBubbleState extends State<AudioMessageBubble> {
+class _AudioMessageBubbleState extends State<AudioMessageBubble>
+    with SingleTickerProviderStateMixin {
   final AudioPlaybackService _playbackService = getIt<AudioPlaybackService>();
   bool _isPlaying = false;
   Duration _position = Duration.zero;
@@ -30,6 +35,13 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   bool _isSeeking = false;
   bool _isPreparingRemoteAudio = false;
   String? _cachedRemoteFilePath;
+
+  // Swipe-to-action animation state
+  static const double _swipeTrigger = 64.0;
+  static const double _swipeMax = 100.0;
+  late final AnimationController _swipeController;
+  double _swipeDragExtent = 0;
+  bool _swipeHapticFired = false;
 
   late final StreamSubscription<String?> _playingIdSub;
   late final StreamSubscription<Duration> _positionSub;
@@ -44,6 +56,12 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
   @override
   void initState() {
     super.initState();
+    _swipeController = AnimationController(
+      vsync: this,
+      lowerBound: 0,
+      upperBound: _swipeMax,
+      value: 0,
+    );
     _totalDuration = widget.message.audioDuration ?? Duration.zero;
 
     _playingIdSub = _playbackService.playingIdStream.listen((id) {
@@ -90,6 +108,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
 
   @override
   void dispose() {
+    _swipeController.dispose();
     _playingIdSub.cancel();
     _positionSub.cancel();
     _durationSub.cancel();
@@ -221,6 +240,49 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
     _isSeeking = false;
   }
 
+  // ── Swipe-to-action animation ───────────────────────────────────
+  void _onSwipeDragUpdate(DragUpdateDetails details) {
+    final dx = details.delta.dx;
+    _swipeDragExtent = (_swipeDragExtent + dx).clamp(0.0, double.infinity);
+    _swipeController.value = math.min(_swipeDragExtent, _swipeMax);
+
+    if (!_swipeHapticFired && _swipeDragExtent >= _swipeTrigger) {
+      _swipeHapticFired = true;
+      HapticFeedback.mediumImpact();
+    }
+  }
+
+  void _onSwipeDragEnd(DragEndDetails details) {
+    _finishSwipe();
+  }
+
+  void _onSwipeDragCancel() {
+    _finishSwipe();
+  }
+
+  void _finishSwipe() {
+    final triggered = _swipeDragExtent >= _swipeTrigger;
+    _swipeDragExtent = 0;
+    _swipeHapticFired = false;
+
+    if (_swipeController.value == 0) {
+      if (triggered && mounted) {
+        MessageActionSheet.show(context, widget.message);
+      }
+      return;
+    }
+
+    final springDesc = SpringDescription(mass: 1, stiffness: 300, damping: 22);
+    final simulation = SpringSimulation(
+      springDesc, _swipeController.value, 0, 0,
+    );
+    _swipeController.animateWith(simulation).then((_) {
+      if (triggered && mounted) {
+        MessageActionSheet.show(context, widget.message);
+      }
+    });
+  }
+
   void _onTapSeek(double fraction) {
     if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
     final clamped = fraction.clamp(0.0, 1.0);
@@ -270,109 +332,168 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble> {
               .clamp(0.0, 1.0)
         : 0.0;
 
-    return Align(
-      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(
-          maxWidth: MediaQuery.of(context).size.width * 0.75,
-          minWidth: 220,
+    final bubbleContent = Container(
+      constraints: BoxConstraints(
+        maxWidth: MediaQuery.of(context).size.width * 0.75,
+        minWidth: 220,
+      ),
+      margin: EdgeInsets.only(
+        left: isOutgoing ? 64 : 8,
+        right: isOutgoing ? 8 : 64,
+        top: 2,
+        bottom: 2,
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: isOutgoing
+            ? AppColors.outgoingBubble
+            : AppColors.incomingBubble,
+        borderRadius: BorderRadius.only(
+          topLeft: const Radius.circular(12),
+          topRight: const Radius.circular(12),
+          bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
+          bottomRight: Radius.circular(isOutgoing ? 0 : 12),
         ),
-        margin: EdgeInsets.only(
-          left: isOutgoing ? 64 : 8,
-          right: isOutgoing ? 8 : 64,
-          top: 2,
-          bottom: 2,
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          color: isOutgoing
-              ? AppColors.outgoingBubble
-              : AppColors.incomingBubble,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(12),
-            topRight: const Radius.circular(12),
-            bottomLeft: Radius.circular(isOutgoing ? 12 : 0),
-            bottomRight: Radius.circular(isOutgoing ? 0 : 12),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _PlayPauseButton(
+            isPlaying: _isPlaying,
+            onTap: _togglePlayback,
+            isOutgoing: isOutgoing,
           ),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _PlayPauseButton(
-              isPlaying: _isPlaying,
-              onTap: _togglePlayback,
-              isOutgoing: isOutgoing,
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                _SeekableWaveformBar(
+                  progress: progress,
+                  isOutgoing: isOutgoing,
+                  seekEnabled: _isThisMessage,
+                  onTapSeek: _onTapSeek,
+                  onDragStart: _onDragStart,
+                  onDragUpdate: _onDragUpdate,
+                  onDragEnd: _onDragEnd,
+                  onDragCancel: _onDragCancel,
+                ),
+                const SizedBox(height: 4),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _isPlaying || _isThisMessage
+                              ? _formatDuration(_position)
+                              : _formatDuration(_totalDuration),
+                          style: TextStyle(
+                            color: AppColors.textSecondary.withValues(
+                              alpha: 0.8,
+                            ),
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (_isThisMessage) ...[
+                          const SizedBox(width: 6),
+                          _SpeedButton(
+                            speed: _playbackSpeed,
+                            onTap: _cycleSpeed,
+                            isOutgoing: isOutgoing,
+                          ),
+                        ],
+                      ],
+                    ),
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          time,
+                          style: TextStyle(
+                            color: AppColors.textSecondary.withValues(
+                              alpha: 0.7,
+                            ),
+                            fontSize: 11,
+                          ),
+                        ),
+                        if (isOutgoing) ...[
+                          const SizedBox(width: 4),
+                          MessageStatusIcon(
+                            status: widget.message.status,
+                            size: 14,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ],
             ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _SeekableWaveformBar(
-                    progress: progress,
-                    isOutgoing: isOutgoing,
-                    onTapSeek: _onTapSeek,
-                    onDragStart: _onDragStart,
-                    onDragUpdate: _onDragUpdate,
-                    onDragEnd: _onDragEnd,
-                    onDragCancel: _onDragCancel,
-                  ),
-                  const SizedBox(height: 4),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            _isPlaying || _isThisMessage
-                                ? _formatDuration(_position)
-                                : _formatDuration(_totalDuration),
-                            style: TextStyle(
-                              color: AppColors.textSecondary.withValues(
-                                alpha: 0.8,
-                              ),
-                              fontSize: 11,
-                            ),
+          ),
+        ],
+      ),
+    );
+
+    return GestureDetector(
+      onHorizontalDragUpdate: _isThisMessage ? null : _onSwipeDragUpdate,
+      onHorizontalDragEnd: _isThisMessage ? null : _onSwipeDragEnd,
+      onHorizontalDragCancel: _isThisMessage ? null : _onSwipeDragCancel,
+      child: AnimatedBuilder(
+        animation: _swipeController,
+        builder: (context, child) {
+          final dx = _swipeController.value;
+          final swipeProgress = (dx / _swipeTrigger).clamp(0.0, 1.0);
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: isOutgoing ? null : 4,
+                right: isOutgoing ? 4 : null,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: Opacity(
+                    opacity: swipeProgress,
+                    child: Transform.scale(
+                      scale: 0.4 + swipeProgress * 0.6,
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(
+                            alpha: 0.18 + swipeProgress * 0.22,
                           ),
-                          if (_isThisMessage) ...[
-                            const SizedBox(width: 6),
-                            _SpeedButton(
-                              speed: _playbackSpeed,
-                              onTap: _cycleSpeed,
-                              isOutgoing: isOutgoing,
-                            ),
-                          ],
-                        ],
-                      ),
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            time,
-                            style: TextStyle(
-                              color: AppColors.textSecondary.withValues(
-                                alpha: 0.7,
-                              ),
-                              fontSize: 11,
-                            ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.reply,
+                          size: 18,
+                          color: AppColors.accent.withValues(
+                            alpha: 0.5 + swipeProgress * 0.5,
                           ),
-                          if (isOutgoing) ...[
-                            const SizedBox(width: 4),
-                            MessageStatusIcon(
-                              status: widget.message.status,
-                              size: 14,
-                            ),
-                          ],
-                        ],
+                        ),
                       ),
-                    ],
+                    ),
                   ),
-                ],
+                ),
               ),
-            ),
-          ],
+              Transform.translate(
+                offset: Offset(dx, 0),
+                child: child,
+              ),
+            ],
+          );
+        },
+        child: Align(
+          alignment: isOutgoing
+              ? Alignment.centerRight
+              : Alignment.centerLeft,
+          child: bubbleContent,
         ),
       ),
     );
@@ -457,6 +578,7 @@ class _SpeedButton extends StatelessWidget {
 class _SeekableWaveformBar extends StatelessWidget {
   final double progress;
   final bool isOutgoing;
+  final bool seekEnabled;
   final ValueChanged<double> onTapSeek;
   final VoidCallback onDragStart;
   final ValueChanged<double> onDragUpdate;
@@ -466,6 +588,7 @@ class _SeekableWaveformBar extends StatelessWidget {
   const _SeekableWaveformBar({
     required this.progress,
     required this.isOutgoing,
+    required this.seekEnabled,
     required this.onTapSeek,
     required this.onDragStart,
     required this.onDragUpdate,
@@ -487,6 +610,19 @@ class _SeekableWaveformBar extends StatelessWidget {
         double fractionFromX(double dx) =>
             (dx / totalBarsWidth).clamp(0.0, 1.0);
 
+        final waveformPaint = CustomPaint(
+          size: Size(constraints.maxWidth, 28),
+          painter: _WaveformPainter(
+            progress: progress,
+            activeColor: isOutgoing
+                ? AppColors.textPrimary
+                : AppColors.accent,
+            inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
+          ),
+        );
+
+        if (!seekEnabled) return waveformPaint;
+
         return GestureDetector(
           behavior: HitTestBehavior.opaque,
           onTapUp: (details) {
@@ -501,16 +637,7 @@ class _SeekableWaveformBar extends StatelessWidget {
           },
           onHorizontalDragEnd: onDragEnd,
           onHorizontalDragCancel: onDragCancel,
-          child: CustomPaint(
-            size: Size(constraints.maxWidth, 28),
-            painter: _WaveformPainter(
-              progress: progress,
-              activeColor: isOutgoing
-                  ? AppColors.textPrimary
-                  : AppColors.accent,
-              inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
-            ),
-          ),
+          child: waveformPaint,
         );
       },
     );
