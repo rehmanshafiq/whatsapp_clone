@@ -39,6 +39,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   static const double _messageJumpExtentEstimate = 96.0;
   static const int _maxPaginationAttemptsForReplyJump = 20;
   static const int _maxScrollAttemptsForReplyJump = 8;
+  static const int _replyJumpFlashCycles = 2;
 
   // ------------------------------------------------------------------
   // State
@@ -49,6 +50,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
   bool _showScrollToBottom = false;
+  String? _flashingMessageId;
+  bool _showFlashingOverlay = false;
+  int _flashSequence = 0;
 
   /// The maxScrollExtent captured **once** at the start of each pagination
   /// request.  Nulled out after the post-frame delta jump is applied.
@@ -149,7 +153,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       return;
     }
 
-    await _scrollToMessageById(messageId);
+    final scrolled = await _scrollToMessageById(messageId);
+    if (!mounted || !scrolled) return;
+    await _flashJumpTargetMessage(messageId);
   }
 
   Future<bool> _ensureTargetMessageIsLoaded(String messageId) async {
@@ -182,9 +188,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     );
   }
 
-  Future<void> _scrollToMessageById(String messageId) async {
+  Future<bool> _scrollToMessageById(String messageId) async {
     for (var i = 0; i < _maxScrollAttemptsForReplyJump; i++) {
-      if (!mounted || !_scrollController.hasClients) return;
+      if (!mounted || !_scrollController.hasClients) return false;
 
       final targetKey = _messageKeysById[messageId];
       final targetContext = targetKey?.currentContext;
@@ -196,7 +202,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           duration: const Duration(milliseconds: 260),
           curve: Curves.easeOutCubic,
         );
-        return;
+        return true;
       }
 
       final estimatedOffset = _estimateOffsetForMessage(messageId);
@@ -206,6 +212,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
 
       await Future<void>.delayed(const Duration(milliseconds: 16));
     }
+    return false;
   }
 
   double? _estimateOffsetForMessage(String messageId) {
@@ -228,6 +235,33 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     final estimate = listIndexFromBottom * _messageJumpExtentEstimate;
     final clamped = estimate.clamp(0.0, _scrollController.position.maxScrollExtent);
     return clamped.toDouble();
+  }
+
+  Future<void> _flashJumpTargetMessage(String messageId) async {
+    final sequence = ++_flashSequence;
+    if (!mounted) return;
+
+    setState(() {
+      _flashingMessageId = messageId;
+      _showFlashingOverlay = true;
+    });
+
+    for (var i = 0; i < _replyJumpFlashCycles; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      if (!mounted || sequence != _flashSequence) return;
+      setState(() => _showFlashingOverlay = false);
+
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+      if (!mounted || sequence != _flashSequence) return;
+      setState(() => _showFlashingOverlay = true);
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted || sequence != _flashSequence) return;
+    setState(() {
+      _showFlashingOverlay = false;
+      _flashingMessageId = null;
+    });
   }
 
   /// Called after older messages finish loading.
@@ -767,6 +801,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         reactionsController:
                                             _reactionsController,
                                         onReactionChanged: () => setState(() {}),
+                                        isFlashHighlighted:
+                                            _flashingMessageId == message.id &&
+                                            _showFlashingOverlay,
                                         onReplyPreviewTap:
                                             (message.replyToMessageId == null ||
                                                 message

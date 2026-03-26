@@ -394,6 +394,7 @@ class MessageBubble extends StatelessWidget {
   final ReactionsController reactionsController;
   final VoidCallback? onReactionChanged;
   final VoidCallback? onReplyPreviewTap;
+  final bool isFlashHighlighted;
 
   const MessageBubble({
     super.key,
@@ -401,6 +402,7 @@ class MessageBubble extends StatelessWidget {
     required this.reactionsController,
     this.onReactionChanged,
     this.onReplyPreviewTap,
+    this.isFlashHighlighted = false,
   });
 
   @override
@@ -472,27 +474,37 @@ class MessageBubble extends StatelessWidget {
         context.read<ChatCubit>().removeReaction(message.id, reaction);
         onReactionChanged?.call();
       },
-      child: _SwipeableMessage(
-        enabled: !message.isAudio,
-        isOutgoing: message.isOutgoing,
-        onSwipeComplete: () => MessageActionSheet.show(context, message),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: message.isOutgoing
-              ? CrossAxisAlignment.end
-              : CrossAxisAlignment.start,
-          children: [
-            bubble,
-            if (message.reactions.isNotEmpty)
-              Padding(
-                padding: EdgeInsets.only(
-                  left: message.isOutgoing ? 64 : 8,
-                  right: message.isOutgoing ? 8 : 64,
-                  top: 2,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 140),
+        curve: Curves.easeOut,
+        decoration: BoxDecoration(
+          color: isFlashHighlighted
+              ? AppColors.accent.withValues(alpha: 0.22)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: _SwipeableMessage(
+          enabled: !message.isAudio,
+          isOutgoing: message.isOutgoing,
+          onSwipeComplete: () => MessageActionSheet.show(context, message),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: message.isOutgoing
+                ? CrossAxisAlignment.end
+                : CrossAxisAlignment.start,
+            children: [
+              bubble,
+              if (message.reactions.isNotEmpty)
+                Padding(
+                  padding: EdgeInsets.only(
+                    left: message.isOutgoing ? 64 : 8,
+                    right: message.isOutgoing ? 8 : 64,
+                    top: 2,
+                  ),
+                  child: _ReactionRow(reactions: message.reactions),
                 ),
-                child: _ReactionRow(reactions: message.reactions),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
