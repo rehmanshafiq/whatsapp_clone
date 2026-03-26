@@ -13,6 +13,7 @@ class ChatState extends Equatable {
   final bool isOnline;
   final bool isSending;
   final bool isLoading;
+  final bool hasLoadedMessages;
   final bool isPaginationLoading;
   final bool hasMoreMessages;
   final String? error;
@@ -38,6 +39,7 @@ class ChatState extends Equatable {
     this.isOnline = false,
     this.isSending = false,
     this.isLoading = false,
+    this.hasLoadedMessages = false,
     this.isPaginationLoading = false,
     this.hasMoreMessages = true,
     this.error,
@@ -59,6 +61,7 @@ class ChatState extends Equatable {
     bool? isOnline,
     bool? isSending,
     bool? isLoading,
+    bool? hasLoadedMessages,
     bool? isPaginationLoading,
     bool? hasMoreMessages,
     String? error,
@@ -85,6 +88,7 @@ class ChatState extends Equatable {
       isOnline: isOnline ?? this.isOnline,
       isSending: isSending ?? this.isSending,
       isLoading: isLoading ?? this.isLoading,
+      hasLoadedMessages: hasLoadedMessages ?? this.hasLoadedMessages,
       isPaginationLoading: isPaginationLoading ?? this.isPaginationLoading,
       hasMoreMessages: hasMoreMessages ?? this.hasMoreMessages,
       error: clearError ? null : (error ?? this.error),
@@ -122,6 +126,7 @@ class ChatState extends Equatable {
     isOnline,
     isSending,
     isLoading,
+    hasLoadedMessages,
     isPaginationLoading,
     hasMoreMessages,
     error,

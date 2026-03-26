@@ -69,8 +69,9 @@ class ChatRepository {
         );
       }
 
-      final profile =
-          await _remoteDataSource.fetchCurrentUserProfile(token: token);
+      final profile = await _remoteDataSource.fetchCurrentUserProfile(
+        token: token,
+      );
       _cachedCurrentUserProfile = profile;
       return profile;
     } on ApiException {
@@ -103,11 +104,13 @@ class ChatRepository {
       final filtered = blockedIds.isEmpty
           ? remoteChats
           : remoteChats
-              .where((c) =>
-                  c.peerUserId == null ||
-                  c.peerUserId!.isEmpty ||
-                  !blockedIds.contains(c.peerUserId))
-              .toList();
+                .where(
+                  (c) =>
+                      c.peerUserId == null ||
+                      c.peerUserId!.isEmpty ||
+                      !blockedIds.contains(c.peerUserId),
+                )
+                .toList();
 
       _storageService.saveChats(filtered);
       return filtered;
@@ -115,6 +118,16 @@ class ChatRepository {
       rethrow;
     } catch (e) {
       throw ApiException(message: e.toString());
+    }
+  }
+
+  /// Fetches messages from local storage instantly for immediate UI display.
+  List<Message> getLocalMessages(String channelId) {
+    try {
+      final fromStorage = _storageService.getMessagesForChannel(channelId);
+      return _normalizeMessageSenderIds(fromStorage);
+    } catch (_) {
+      return [];
     }
   }
 
@@ -131,12 +144,16 @@ class ChatRepository {
           statusCode: 401,
         );
       }
-      final page =
-          await _remoteDataSource.fetchMessages(channelId, token: token, limit: limit);
+      final page = await _remoteDataSource.fetchMessages(
+        channelId,
+        token: token,
+        limit: limit,
+      );
       var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       final existingById = <String, Message>{
-        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+        for (final m in allMessages.where((m) => m.channelId == channelId))
+          m.id: m,
       };
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -183,7 +200,9 @@ class ChatRepository {
       var normalized = _normalizeMessageSenderIds(page.messages);
       // Merge into storage: older messages go to the front of the channel's list
       final allMessages = _storageService.getMessages();
-      final existing = allMessages.where((m) => m.channelId == channelId).toList();
+      final existing = allMessages
+          .where((m) => m.channelId == channelId)
+          .toList();
       final existingById = <String, Message>{for (final m in existing) m.id: m};
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -216,10 +235,11 @@ class ChatRepository {
     final myId = _storageService.getUserId();
     if (myId == null || myId.isEmpty) return messages;
     return messages
-        .map((m) =>
-            m.senderId == myId
-                ? m.copyWith(senderId: AppConstants.currentUserId)
-                : m)
+        .map(
+          (m) => m.senderId == myId
+              ? m.copyWith(senderId: AppConstants.currentUserId)
+              : m,
+        )
         .toList();
   }
 
@@ -259,7 +279,8 @@ class ChatRepository {
       var normalized = _normalizeMessageSenderIds(page.messages);
       final allMessages = _storageService.getMessages();
       final existingById = <String, Message>{
-        for (final m in allMessages.where((m) => m.channelId == channelId)) m.id: m,
+        for (final m in allMessages.where((m) => m.channelId == channelId))
+          m.id: m,
       };
       normalized = _mergeReactionsFromLocal(
         incoming: normalized,
@@ -374,6 +395,7 @@ class ChatRepository {
           // Backend contract: "voice" for voice notes.
           attachmentType: 'voice',
           attachmentUrl: mediaUrl,
+          audioDuration: audioDuration,
         );
       }
 
@@ -688,6 +710,7 @@ class ChatRepository {
           body: body,
           attachmentType: attachmentType,
           attachmentUrl: attachmentUrl,
+          audioDuration: source.isAudio ? source.audioDuration : null,
           isViewOnce: source.isViewOnce,
           replyToMessageId: source.replyToMessageId ?? '',
           isForwarded: true,
@@ -777,6 +800,69 @@ class ChatRepository {
     _persistMessage(message);
   }
 
+  /// Uploads a media file and returns the server URL.
+  /// Used by the cubit for optimistic media sending (upload separately,
+  /// then send the message with the returned URL).
+  Future<String> uploadMedia({
+    required String filePath,
+    required String type,
+  }) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.uploadMedia(
+      filePath: filePath,
+      token: token,
+      type: type,
+    );
+  }
+
+  /// Public accessor for peer user id so the cubit can send socket messages.
+  String? getPeerUserIdForChannel(String channelId) {
+    return _getPeerUserIdForChannel(channelId);
+  }
+
+  /// Public accessor so the cubit can send messages over WebSocket directly.
+  void sendMessageOverSocket({
+    required String clientMsgId,
+    required String conversationId,
+    required String peerUserId,
+    required String body,
+    String attachmentType = '',
+    String attachmentUrl = '',
+    Duration? audioDuration,
+    bool isViewOnce = false,
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) {
+    _sendMessageOverSocket(
+      clientMsgId: clientMsgId,
+      conversationId: conversationId,
+      peerUserId: peerUserId,
+      body: body,
+      attachmentType: attachmentType,
+      attachmentUrl: attachmentUrl,
+      audioDuration: audioDuration,
+      isViewOnce: isViewOnce,
+      replyToMessageId: replyToMessageId,
+      isForwarded: isForwarded,
+    );
+  }
+
+  /// Public wrapper so the cubit can persist messages after optimistic send.
+  void persistMessage(Message message) {
+    _persistMessage(message);
+  }
+
+  /// Public wrapper for sendMessage on the remote data source.
+  Future<Message> sendRemoteMessage(Message message) {
+    return _remoteDataSource.sendMessage(message);
+  }
+
   /// Replaces optimistic message id with server-assigned id (from message_sent_ack).
   void replaceOptimisticMessageId(String clientMsgId, String serverMessageId) {
     final allMessages = _storageService.getMessages();
@@ -804,10 +890,11 @@ class ChatRepository {
     if (idx >= 0) {
       final msg = allMessages[idx];
       // Message is unread if it is incoming and status is not seen (or read)
-      final isUnreadIncoming = !msg.isOutgoing && msg.status != MessageStatus.seen;
-      
+      final isUnreadIncoming =
+          !msg.isOutgoing && msg.status != MessageStatus.seen;
+
       allMessages[idx] = msg.copyWith(
-        text: 'This message was deleted',
+        text: 'message deleted',
         type: MessageType.text,
         audioPath: null,
         mediaUrl: null,
@@ -819,6 +906,11 @@ class ChatRepository {
         locationName: null,
         contactName: null,
         contactPhone: null,
+        replyToMessageId: '',
+        replyToSenderId: '',
+        replyToBody: '',
+        replyToAttachmentType: '',
+        isEdited: false,
       );
       _storageService.saveMessages(allMessages);
 
@@ -826,14 +918,22 @@ class ChatRepository {
         final chats = _storageService.getChats();
         final chatIdx = chats.indexWhere((c) => c.id == conversationId);
         if (chatIdx >= 0 && chats[chatIdx].unreadCount > 0) {
-          chats[chatIdx] = chats[chatIdx].copyWith(unreadCount: chats[chatIdx].unreadCount - 1);
+          chats[chatIdx] = chats[chatIdx].copyWith(
+            unreadCount: chats[chatIdx].unreadCount - 1,
+          );
           _storageService.saveChats(chats);
         }
       }
     }
   }
 
-  void handleMessageEditedLocally(String messageId, String conversationId, String newBody, bool isEdited, DateTime? editedAt) {
+  void handleMessageEditedLocally(
+    String messageId,
+    String conversationId,
+    String newBody,
+    bool isEdited,
+    DateTime? editedAt,
+  ) {
     final allMessages = _storageService.getMessages();
     final idx = allMessages.indexWhere((m) => m.id == messageId);
     if (idx >= 0) {
@@ -1269,6 +1369,7 @@ class ChatRepository {
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
+    Duration? audioDuration,
     bool isViewOnce = false,
     String replyToMessageId = '',
     bool isForwarded = false,
@@ -1285,6 +1386,10 @@ class ChatRepository {
         'body': body,
         'attachment_type': attachmentType,
         'attachment_url': attachmentUrl,
+        if (audioDuration != null) ...{
+          'audio_duration_ms': audioDuration.inMilliseconds,
+          'audio_duration': audioDuration.inSeconds,
+        },
         'is_view_once': isViewOnce,
         'reply_to_message_id': replyToMessageId,
         'is_forwarded': isForwarded,

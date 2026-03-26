@@ -27,7 +27,8 @@ class ChatCubit extends Cubit<ChatState> {
   StreamSubscription<dynamic>? _socketSubscription;
 
   /// Auth headers for loading media from our API (Bearer + x-api-key).
-  Map<String, String>? get authHeadersForMedia => _repository.getAuthHeadersForMedia();
+  Map<String, String>? get authHeadersForMedia =>
+      _repository.getAuthHeadersForMedia();
 
   ChatCubit(this._repository) : super(const ChatState()) {
     _socketSubscription = _repository.socketMessages.listen(
@@ -137,16 +138,32 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   Future<void> loadMessages(String channelId) async {
+    final channel = _repository.getChannel(channelId);
+    final localMessages = _repository.getLocalMessages(channelId);
+    localMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    final channelFromState =
+        state.channels.where((c) => c.id == channelId).firstOrNull;
+    final effectiveIsOnline =
+        channelFromState?.isOnline ??
+        (state.selectedChannel?.id == channelId ? state.isOnline : null) ??
+        channel?.isOnline ??
+        false;
+
     emit(
       state.copyWith(
+        messages: localMessages,
+        selectedChannel: channel,
+        isOnline: effectiveIsOnline,
         isLoading: true,
+        hasLoadedMessages: localMessages.isNotEmpty,
         clearError: true,
         isTyping: false,
         isRecordingAudio: false,
       ),
     );
+
     try {
-      final channel = _repository.getChannel(channelId);
       final page = await _repository.getMessages(channelId);
       final messages = page.messages; // Already normalized by repository
       messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -158,7 +175,8 @@ class ChatCubit extends Cubit<ChatState> {
         for (final m in messages) {
           if (!m.isOutgoing && m.status != MessageStatus.seen) {
             final peerUserId = m.senderId; // sender of the message
-            if (peerUserId.isNotEmpty && peerUserId != AppConstants.currentUserId) {
+            if (peerUserId.isNotEmpty &&
+                peerUserId != AppConstants.currentUserId) {
               final bucket = _bucketFromTimestamp(m.timestamp);
               _repository.sendMessageRead(
                 messageId: m.id,
@@ -171,8 +189,9 @@ class ChatCubit extends Cubit<ChatState> {
           }
         }
         // Fetch presence (online, last_seen) from API for initial load.
-        final channelWithPresence =
-            await _repository.fetchPresenceForChannel(channelId);
+        final channelWithPresence = await _repository.fetchPresenceForChannel(
+          channelId,
+        );
         final effectiveChannel = (channelWithPresence ?? channel).copyWith(
           unreadCount: 0,
         );
@@ -201,9 +220,11 @@ class ChatCubit extends Cubit<ChatState> {
         // Preserve isOnline from state.channels (updated by presence_update) or
         // state.isOnline, since repo may have stale data. Otherwise "online"
         // disappears when loadMessages completes after a presence event.
-        final channelFromState =
-            state.channels.where((c) => c.id == channelId).firstOrNull;
-        final effectiveIsOnline = channelFromState?.isOnline ??
+        final channelFromState = state.channels
+            .where((c) => c.id == channelId)
+            .firstOrNull;
+        final effectiveIsOnline =
+            channelFromState?.isOnline ??
             (state.selectedChannel?.id == channelId ? state.isOnline : null) ??
             effectiveChannel.isOnline;
         emit(
@@ -212,16 +233,20 @@ class ChatCubit extends Cubit<ChatState> {
             selectedChannel: effectiveChannel,
             isOnline: effectiveIsOnline,
             isLoading: false,
+            hasLoadedMessages: true,
             hasMoreMessages: page.hasMore,
             channels: updatedChats,
           ),
         );
       } else {
-        emit(state.copyWith(
-          messages: messages,
-          isLoading: false,
-          hasMoreMessages: page.hasMore,
-        ));
+        emit(
+          state.copyWith(
+            messages: messages,
+            isLoading: false,
+            hasLoadedMessages: true,
+            hasMoreMessages: page.hasMore,
+          ),
+        );
       }
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isLoading: false));
@@ -232,8 +257,9 @@ class ChatCubit extends Cubit<ChatState> {
   /// of the list and preserves scroll position. Prevents duplicate calls.
   Future<void> loadOlderMessages(String channelId) async {
     if (state.isPaginationLoading || !state.hasMoreMessages) return;
-    final messagesForChannel =
-        state.messages.where((m) => m.channelId == channelId).toList();
+    final messagesForChannel = state.messages
+        .where((m) => m.channelId == channelId)
+        .toList();
     if (messagesForChannel.isEmpty) return;
 
     emit(state.copyWith(isPaginationLoading: true));
@@ -248,7 +274,9 @@ class ChatCubit extends Cubit<ChatState> {
 
       if (page.messages.isEmpty) {
         if (!isClosed) {
-          emit(state.copyWith(isPaginationLoading: false, hasMoreMessages: false));
+          emit(
+            state.copyWith(isPaginationLoading: false, hasMoreMessages: false),
+          );
         }
         return;
       }
@@ -262,13 +290,20 @@ class ChatCubit extends Cubit<ChatState> {
         }
         final deduped = uniqueById.values.toList();
         deduped.sort((a, b) => a.timestamp.compareTo(b.timestamp));
-        emit(state.copyWith(
-          messages: deduped,
-          isPaginationLoading: false,
-          hasMoreMessages: page.hasMore,
-        ));
+        emit(
+          state.copyWith(
+            messages: deduped,
+            isPaginationLoading: false,
+            hasMoreMessages: page.hasMore,
+          ),
+        );
       } else {
-        emit(state.copyWith(isPaginationLoading: false, hasMoreMessages: page.hasMore));
+        emit(
+          state.copyWith(
+            isPaginationLoading: false,
+            hasMoreMessages: page.hasMore,
+          ),
+        );
       }
     } catch (e) {
       if (!isClosed) {
@@ -306,10 +341,12 @@ class ChatCubit extends Cubit<ChatState> {
           .toList();
       // If this conversation is currently open, clear messages too.
       final isOpen = state.selectedChannel?.id == conversationId;
-      emit(state.copyWith(
-        channels: channels,
-        messages: isOpen ? const <Message>[] : null,
-      ));
+      emit(
+        state.copyWith(
+          channels: channels,
+          messages: isOpen ? const <Message>[] : null,
+        ),
+      );
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -322,8 +359,9 @@ class ChatCubit extends Cubit<ChatState> {
     try {
       await _repository.deleteConversationRemote(conversationId);
       if (isClosed) return;
-      final channels =
-          state.channels.where((c) => c.id != conversationId).toList();
+      final channels = state.channels
+          .where((c) => c.id != conversationId)
+          .toList();
       emit(state.copyWith(channels: channels));
     } on ApiException {
       rethrow;
@@ -338,8 +376,7 @@ class ChatCubit extends Cubit<ChatState> {
       final isMuted = await _repository.toggleMuteConversation(conversationId);
       if (isClosed) return;
       final channels = state.channels
-          .map(
-              (c) => c.id == conversationId ? c.copyWith(isMuted: isMuted) : c)
+          .map((c) => c.id == conversationId ? c.copyWith(isMuted: isMuted) : c)
           .toList();
       emit(state.copyWith(channels: channels));
     } on ApiException {
@@ -392,12 +429,21 @@ class ChatCubit extends Cubit<ChatState> {
       final effectiveReplyTo = replyToMessageId.isNotEmpty
           ? replyToMessageId
           : state.replyingTo?.id ?? '';
-      final message = await _repository.sendMessage(
+      final replyTarget = _resolveReplyTarget(
+        replyToMessageId: effectiveReplyTo,
+        fallback: state.replyingTo,
+      );
+      final sentMessage = await _repository.sendMessage(
         channelId,
         text.trim(),
         replyToMessageId: effectiveReplyTo,
         isForwarded: isForwarded,
       );
+      final message = _hydrateReplyMetadata(
+        sentMessage,
+        replyTarget: replyTarget,
+      );
+      _repository.addOrUpdateMessage(message);
       final updatedMessages = List<Message>.from(state.messages)..add(message);
       emit(
         state.copyWith(
@@ -412,6 +458,79 @@ class ChatCubit extends Cubit<ChatState> {
     } catch (e) {
       emit(state.copyWith(error: e.toString(), isSending: false));
     }
+  }
+
+  Message? _resolveReplyTarget({
+    required String replyToMessageId,
+    Message? fallback,
+  }) {
+    if (replyToMessageId.isEmpty) return null;
+    if (fallback != null && fallback.id == replyToMessageId) return fallback;
+    return _messageById(replyToMessageId) ?? fallback;
+  }
+
+  Message _hydrateReplyMetadata(
+    Message outgoingMessage, {
+    Message? replyTarget,
+  }) {
+    final replyId = outgoingMessage.replyToMessageId;
+    if (replyId == null || replyId.isEmpty || replyTarget == null) {
+      return outgoingMessage;
+    }
+
+    final hasSender = (outgoingMessage.replyToSenderId ?? '').trim().isNotEmpty;
+    final hasBody = (outgoingMessage.replyToBody ?? '').trim().isNotEmpty;
+    final hasAttachmentType = (outgoingMessage.replyToAttachmentType ?? '')
+        .trim()
+        .isNotEmpty;
+
+    if (hasSender && (hasBody || hasAttachmentType)) {
+      return outgoingMessage;
+    }
+
+    return outgoingMessage.copyWith(
+      replyToSenderId: hasSender
+          ? outgoingMessage.replyToSenderId
+          : replyTarget.senderId,
+      replyToBody: hasBody
+          ? outgoingMessage.replyToBody
+          : _replyPreviewBody(replyTarget),
+      replyToAttachmentType: hasAttachmentType
+          ? outgoingMessage.replyToAttachmentType
+          : _replyAttachmentType(replyTarget),
+    );
+  }
+
+  String _replyPreviewBody(Message message) {
+    final text = message.text.trim();
+    if (text.isNotEmpty) return text;
+    if (message.isImage) return 'Photo';
+    if (message.isVideo) return 'Video';
+    if (message.isAudio) return 'Voice message';
+    if (message.isDocument) {
+      final fileName = message.documentFileName?.trim();
+      if (fileName != null && fileName.isNotEmpty) return fileName;
+      return 'Document';
+    }
+    if (message.isLocation) {
+      final address = message.locationAddress?.trim();
+      if (address != null && address.isNotEmpty) return address;
+      return 'Location';
+    }
+    if (message.isGif) return 'GIF';
+    if (message.isSticker) return 'Sticker';
+    return '';
+  }
+
+  String _replyAttachmentType(Message message) {
+    if (message.isImage) return 'image';
+    if (message.isVideo) return 'video';
+    if (message.isAudio) return 'voice';
+    if (message.isDocument) return 'document';
+    if (message.isLocation) return 'location';
+    if (message.isGif) return 'gif';
+    if (message.isSticker) return 'sticker';
+    return '';
   }
 
   void startReplyTo(Message message) {
@@ -504,7 +623,9 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
-    if (eventType == 'typing_indicator' || eventType == 'typing_start' || eventType == 'typing_stop') {
+    if (eventType == 'typing_indicator' ||
+        eventType == 'typing_start' ||
+        eventType == 'typing_stop') {
       _handleTypingEvent(eventType!, raw);
       return;
     }
@@ -550,7 +671,8 @@ class ChatCubit extends Cubit<ChatState> {
     }
 
     // Only process message events (send_message, new_message, or legacy payload without event)
-    final isMessageEvent = eventType == null ||
+    final isMessageEvent =
+        eventType == null ||
         eventType == 'send_message' ||
         eventType == 'new_message' ||
         eventType == 'message';
@@ -563,23 +685,28 @@ class ChatCubit extends Cubit<ChatState> {
       data = raw['payload'] as Map<String, dynamic>;
     }
 
-    final conversationId = _stringFrom(data['conversation_id']) ??
+    final conversationId =
+        _stringFrom(data['conversation_id']) ??
         _stringFrom(data['chat_id']) ??
         _stringFrom(data['channel_id']);
     if (conversationId == null || conversationId.isEmpty) {
-      debugPrint('[ChatCubit] No conversation_id in payload. Keys: ${data.keys.toList()}');
+      debugPrint(
+        '[ChatCubit] No conversation_id in payload. Keys: ${data.keys.toList()}',
+      );
       return;
     }
 
     debugPrint('[ChatCubit] Socket message for conversation: $conversationId');
 
     // Backend sends message text in "body" for send_message
-    final text = _stringFrom(data['body']) ??
+    final text =
+        _stringFrom(data['body']) ??
         _stringFrom(data['message']) ??
         _stringFrom(data['text']) ??
         _stringFrom(data['last_message_text']) ??
         '';
-    final timestampRaw = data['timestamp'] ??
+    final timestampRaw =
+        data['timestamp'] ??
         data['created_at'] ??
         data['sent_at'] ??
         data['last_message_at'] ??
@@ -598,8 +725,10 @@ class ChatCubit extends Cubit<ChatState> {
 
     // peer_user_id = recipient. When it equals currentUserId, we're the recipient (incoming).
     final peerUserId = _stringFrom(data['peer_user_id']);
-    final senderId = _stringFrom(data['sender_id']) ?? _stringFrom(data['from_user_id']);
-    final isOutgoing = peerUserId != null && peerUserId != AppConstants.currentUserId;
+    final senderId =
+        _stringFrom(data['sender_id']) ?? _stringFrom(data['from_user_id']);
+    final isOutgoing =
+        peerUserId != null && peerUserId != AppConstants.currentUserId;
     final isOpen = state.selectedChannel?.id == conversationId;
 
     final channels = List<ChatChannel>.of(state.channels);
@@ -608,11 +737,14 @@ class ChatCubit extends Cubit<ChatState> {
     // [New Message Processing: Step 2]
     // If the conversation doesn't exist (first-ever message), create a placeholder
     if (idx == -1 && eventType == 'new_message') {
-      debugPrint('[ChatCubit] Creating placeholder channel for $conversationId');
-      
-      final senderDisplayName = _stringFrom(data['sender_display_name']) ?? 'Unknown';
+      debugPrint(
+        '[ChatCubit] Creating placeholder channel for $conversationId',
+      );
+
+      final senderDisplayName =
+          _stringFrom(data['sender_display_name']) ?? 'Unknown';
       var senderAvatarUrl = _stringFrom(data['sender_avatar_url']) ?? '';
-      
+
       // Some server payloads send relative avatar paths.
       if (senderAvatarUrl.isNotEmpty && !senderAvatarUrl.startsWith('http')) {
         senderAvatarUrl = '${AppConstants.apiBaseUrl}$senderAvatarUrl';
@@ -630,15 +762,19 @@ class ChatCubit extends Cubit<ChatState> {
 
       channels.insert(0, newChannel);
       idx = 0; // Point to newly inserted channel
-      
+
       // Force save so next lookup finds it locally
-      _repository.createChat(User(
-        id: senderId ?? '', 
-        name: senderDisplayName, 
-        avatarUrl: senderAvatarUrl
-      ));
+      _repository.createChat(
+        User(
+          id: senderId ?? '',
+          name: senderDisplayName,
+          avatarUrl: senderAvatarUrl,
+        ),
+      );
     } else if (idx == -1) {
-      debugPrint('[ChatCubit] Conversation $conversationId not in local list, reloading...');
+      debugPrint(
+        '[ChatCubit] Conversation $conversationId not in local list, reloading...',
+      );
       loadChats();
       return;
     }
@@ -652,10 +788,12 @@ class ChatCubit extends Cubit<ChatState> {
     }
 
     // Socket may send type in "type" or "attachment_type" (e.g. web app sends attachment_type).
-    final messageTypeStr = _stringFrom(data['type']) ??
+    final messageTypeStr =
+        _stringFrom(data['type']) ??
         _stringFrom(data['attachment_type'])?.toLowerCase() ??
         '';
-    final attachmentUrlRaw = _stringFrom(data['attachment_url']) ??
+    final attachmentUrlRaw =
+        _stringFrom(data['attachment_url']) ??
         _stringFrom(data['mediaUrl']) ??
         '';
     final String resolvedPayloadText;
@@ -686,12 +824,15 @@ class ChatCubit extends Cubit<ChatState> {
           resolvedPayloadText = '\u{1F4CD} Location';
           break;
         default:
-          resolvedPayloadText =
-              messageTypeStr.isNotEmpty ? '\u{1F4DD} Message' : '';
+          resolvedPayloadText = messageTypeStr.isNotEmpty
+              ? '\u{1F4DD} Message'
+              : '';
       }
     }
 
-    final displayText = resolvedPayloadText.isNotEmpty ? resolvedPayloadText : current.lastMessage;
+    final displayText = resolvedPayloadText.isNotEmpty
+        ? resolvedPayloadText
+        : current.lastMessage;
     final updated = current.copyWith(
       lastMessage: displayText,
       lastMessageTime: timestamp,
@@ -776,38 +917,52 @@ class ChatCubit extends Cubit<ChatState> {
       }
 
       // Don't store "Photo" as caption for image messages — show image only.
-      final bool isPlaceholderCaption = messageTextForList == 'Photo' ||
+      final bool isPlaceholderCaption =
+          messageTextForList == 'Photo' ||
           messageTextForList == '\u{1F4F7} Photo';
-      final String messageText = (resolvedType == MessageType.image &&
-              isPlaceholderCaption)
+      final String messageText =
+          (resolvedType == MessageType.image && isPlaceholderCaption)
           ? ''
           : messageTextForList;
 
-      final isViewOnce = data['is_view_once'] == true || data['isViewOnce'] == true;
-      final replyToMessageId = _stringFrom(data['reply_to_message_id']) ??
+      final isViewOnce =
+          data['is_view_once'] == true || data['isViewOnce'] == true;
+      final replyToMessageId =
+          _stringFrom(data['reply_to_message_id']) ??
           _stringFrom(data['replyToMessageId']);
       final isForwarded =
           data['is_forwarded'] == true || data['isForwarded'] == true;
-      final replyToSenderId = _stringFrom(data['reply_to_sender_id']) ??
+      final replyToSenderId =
+          _stringFrom(data['reply_to_sender_id']) ??
           _stringFrom(data['replyToSenderId']);
       final replyToBody =
-          _stringFrom(data['reply_to_body']) ?? _stringFrom(data['replyToBody']);
+          _stringFrom(data['reply_to_body']) ??
+          _stringFrom(data['replyToBody']);
       final replyToAttachmentType =
           _stringFrom(data['reply_to_attachment_type']) ??
-              _stringFrom(data['replyToAttachmentType']);
-      final viewOnceOpenedAtRaw = data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
+          _stringFrom(data['replyToAttachmentType']);
+      final viewOnceOpenedAtRaw =
+          data['view_once_opened_at'] ?? data['viewOnceOpenedAt'];
       final DateTime? viewOnceOpenedAt = viewOnceOpenedAtRaw != null
           ? (viewOnceOpenedAtRaw is String
-              ? DateTime.tryParse(viewOnceOpenedAtRaw)
-              : viewOnceOpenedAtRaw is int
-                  ? DateTime.fromMillisecondsSinceEpoch(viewOnceOpenedAtRaw, isUtc: true)
-                  : null)
+                ? DateTime.tryParse(viewOnceOpenedAtRaw)
+                : viewOnceOpenedAtRaw is int
+                ? DateTime.fromMillisecondsSinceEpoch(
+                    viewOnceOpenedAtRaw,
+                    isUtc: true,
+                  )
+                : null)
           : null;
 
       final message = Message(
-        id: _stringFrom(data['client_msg_id']) ??
-            _stringFrom(data['message_id']) ??
-            _stringFrom(data['id']) ??
+        id:
+            (isOutgoing
+                ? _stringFrom(data['client_msg_id']) ??
+                      _stringFrom(data['message_id']) ??
+                      _stringFrom(data['id'])
+                : _stringFrom(data['message_id']) ??
+                      _stringFrom(data['id']) ??
+                      _stringFrom(data['client_msg_id'])) ??
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
@@ -816,6 +971,9 @@ class ChatCubit extends Cubit<ChatState> {
         status: MessageStatus.sent,
         type: resolvedType,
         mediaUrl: resolvedMediaUrl,
+        audioDuration: resolvedType == MessageType.audio
+            ? _parseAudioDurationFromPayload(data)
+            : null,
         isViewOnce: isViewOnce,
         viewOnceOpenedAt: viewOnceOpenedAt,
         replyToMessageId: replyToMessageId,
@@ -835,12 +993,16 @@ class ChatCubit extends Cubit<ChatState> {
     // [New Message Processing: Step 4 / 5]
     // Send delivered / read receipts correctly mapped by sender_id bucket
     if (eventType == 'new_message' && !isOutgoing) {
-      final serverMsgId = _stringFrom(data['message_id']) ?? _stringFrom(data['id']) ?? 'unknown';
-      final bucket = _stringFrom(data['bucket']) ?? _bucketFromTimestamp(timestamp);
+      final serverMsgId =
+          _stringFrom(data['message_id']) ??
+          _stringFrom(data['id']) ??
+          'unknown';
+      final bucket =
+          _stringFrom(data['bucket']) ?? _bucketFromTimestamp(timestamp);
       final senderIdForDelivered = senderId ?? 'unknown';
 
       if (senderIdForDelivered.isNotEmpty && serverMsgId != 'unknown') {
-         // Step 4: Send text delivered successfully
+        // Step 4: Send text delivered successfully
         _repository.sendMessageDelivered(
           messageId: serverMsgId,
           conversationId: conversationId,
@@ -850,7 +1012,7 @@ class ChatCubit extends Cubit<ChatState> {
 
         // Step 5: Send read if open
         if (isOpen) {
-           _repository.sendMessageRead(
+          _repository.sendMessageRead(
             messageId: serverMsgId,
             conversationId: conversationId,
             bucket: bucket,
@@ -860,11 +1022,10 @@ class ChatCubit extends Cubit<ChatState> {
       }
     }
 
-    debugPrint('[ChatCubit] Emitting updated channels (count: ${channels.length})');
-    emit(state.copyWith(
-      channels: channels,
-      messages: updatedMessages,
-    ));
+    debugPrint(
+      '[ChatCubit] Emitting updated channels (count: ${channels.length})',
+    );
+    emit(state.copyWith(channels: channels, messages: updatedMessages));
   }
 
   void _handleTypingEvent(String eventType, Map<String, dynamic> raw) {
@@ -873,8 +1034,11 @@ class ChatCubit extends Cubit<ChatState> {
         ? raw['data'] as Map<String, dynamic>
         : raw;
     final conversationId = _stringFrom(data['conversation_id']);
-    if (conversationId == null || state.selectedChannel?.id != conversationId) return;
-    final isTyping = eventType == 'typing_indicator' ? data['is_typing'] == true : eventType == 'typing_start';
+    if (conversationId == null || state.selectedChannel?.id != conversationId)
+      return;
+    final isTyping = eventType == 'typing_indicator'
+        ? data['is_typing'] == true
+        : eventType == 'typing_start';
     emit(state.copyWith(isTyping: isTyping));
   }
 
@@ -884,7 +1048,8 @@ class ChatCubit extends Cubit<ChatState> {
         ? raw['data'] as Map<String, dynamic>
         : raw;
     final conversationId = _stringFrom(data['conversation_id']);
-    if (conversationId == null || state.selectedChannel?.id != conversationId) return;
+    if (conversationId == null || state.selectedChannel?.id != conversationId)
+      return;
     final isRecording = eventType == 'recording_start';
     emit(state.copyWith(isRecordingAudio: isRecording));
   }
@@ -911,7 +1076,8 @@ class ChatCubit extends Cubit<ChatState> {
         ? raw['data'] as Map<String, dynamic>
         : raw;
     final clientMsgId = _stringFrom(data['client_msg_id']);
-    final serverMessageId = _stringFrom(data['message_id']) ?? _stringFrom(data['id']);
+    final serverMessageId =
+        _stringFrom(data['message_id']) ?? _stringFrom(data['id']);
     if (clientMsgId == null || serverMessageId == null) return;
     final messages = state.messages;
     final idx = messages.indexWhere((m) => m.id == clientMsgId);
@@ -920,7 +1086,8 @@ class ChatCubit extends Cubit<ChatState> {
     _statusTimers.remove(clientMsgId);
     _repository.replaceOptimisticMessageId(clientMsgId, serverMessageId);
     final updatedMessages = messages.map((m) {
-      if (m.id == clientMsgId) return m.copyWith(id: serverMessageId, status: MessageStatus.sent);
+      if (m.id == clientMsgId)
+        return m.copyWith(id: serverMessageId, status: MessageStatus.sent);
       return m;
     }).toList();
     emit(state.copyWith(messages: updatedMessages));
@@ -934,9 +1101,12 @@ class ChatCubit extends Cubit<ChatState> {
     final messageId = _stringFrom(data['message_id']);
     final conversationId = _stringFrom(data['conversation_id']);
     final statusStr = _stringFrom(data['status']);
-    if (messageId == null || conversationId == null || statusStr == null) return;
+    if (messageId == null || conversationId == null || statusStr == null)
+      return;
 
-    final status = statusStr == 'read' ? MessageStatus.seen : MessageStatus.delivered;
+    final status = statusStr == 'read'
+        ? MessageStatus.seen
+        : MessageStatus.delivered;
 
     _repository.updateMessageStatus(messageId, status);
 
@@ -968,7 +1138,7 @@ class ChatCubit extends Cubit<ChatState> {
     final data = raw['data'] is Map<String, dynamic>
         ? raw['data'] as Map<String, dynamic>
         : raw;
-    
+
     final conversationId = _stringFrom(data['conversation_id']);
     if (conversationId == null) return;
 
@@ -981,7 +1151,7 @@ class ChatCubit extends Cubit<ChatState> {
 
     final lastMessageText = _stringFrom(data['last_message_text']) ?? '';
     final lastMessageSender = _stringFrom(data['last_message_sender']);
-    
+
     final statusStr = _stringFrom(data['last_message_status']);
     MessageStatus? lastMessageStatus;
     if (statusStr == 'read' || statusStr == 'seen') {
@@ -997,13 +1167,18 @@ class ChatCubit extends Cubit<ChatState> {
     final timestampRaw = data['last_message_at'];
     DateTime timestamp = DateTime.now();
     if (timestampRaw is String) {
-       timestamp = DateTime.tryParse(timestampRaw)?.toLocal() ?? DateTime.now();
+      timestamp = DateTime.tryParse(timestampRaw)?.toLocal() ?? DateTime.now();
     } else if (timestampRaw is int) {
-       timestamp = DateTime.fromMillisecondsSinceEpoch(timestampRaw, isUtc: true).toLocal();
+      timestamp = DateTime.fromMillisecondsSinceEpoch(
+        timestampRaw,
+        isUtc: true,
+      ).toLocal();
     }
 
-    int unreadCount = data['unread_count'] is int ? data['unread_count'] as int : 0;
-    
+    int unreadCount = data['unread_count'] is int
+        ? data['unread_count'] as int
+        : 0;
+
     final isOpen = state.selectedChannel?.id == conversationId;
     if (isOpen) {
       unreadCount = 0;
@@ -1042,7 +1217,7 @@ class ChatCubit extends Cubit<ChatState> {
 
     channels.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     _repository.upsertChannel(updated);
-    
+
     emit(state.copyWith(channels: channels));
   }
 
@@ -1055,7 +1230,8 @@ class ChatCubit extends Cubit<ChatState> {
     final conversationId = _stringFrom(data['conversation_id']);
     final userIdRaw = _stringFrom(data['user_id']);
     final emoji = _stringFrom(data['emoji']) ?? '';
-    if (messageId == null || conversationId == null || userIdRaw == null) return;
+    if (messageId == null || conversationId == null || userIdRaw == null)
+      return;
     final userId = _normalizeReactionUserId(userIdRaw);
 
     _applyReactionUpdate(
@@ -1068,7 +1244,9 @@ class ChatCubit extends Cubit<ChatState> {
 
   void _handleMessageDeleted(Map<String, dynamic> raw) {
     if (isClosed) return;
-    final data = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
     final messageId = _stringFrom(data['message_id']);
     final conversationId = _stringFrom(data['conversation_id']);
     if (messageId == null || conversationId == null) return;
@@ -1077,7 +1255,7 @@ class ChatCubit extends Cubit<ChatState> {
       final updatedMessages = state.messages.map((m) {
         if (m.id == messageId) {
           return m.copyWith(
-            text: 'This message was deleted',
+            text: 'message deleted',
             type: MessageType.text,
             audioPath: null,
             mediaUrl: null,
@@ -1089,6 +1267,11 @@ class ChatCubit extends Cubit<ChatState> {
             locationName: null,
             contactName: null,
             contactPhone: null,
+            replyToMessageId: '',
+            replyToSenderId: '',
+            replyToBody: '',
+            replyToAttachmentType: '',
+            isEdited: false,
           );
         }
         return m;
@@ -1097,7 +1280,7 @@ class ChatCubit extends Cubit<ChatState> {
     }
 
     _repository.handleMessageDeletedLocally(messageId, conversationId);
-    
+
     // We update the channel list in case the deleted message was the last message displayed.
     // It will fetch updated channels from DB.
     refreshChatList();
@@ -1105,7 +1288,9 @@ class ChatCubit extends Cubit<ChatState> {
 
   void _handleMessageEdited(Map<String, dynamic> raw) {
     if (isClosed) return;
-    final data = raw['data'] is Map<String, dynamic> ? raw['data'] as Map<String, dynamic> : raw;
+    final data = raw['data'] is Map<String, dynamic>
+        ? raw['data'] as Map<String, dynamic>
+        : raw;
     final messageId = _stringFrom(data['message_id']);
     final conversationId = _stringFrom(data['conversation_id']);
     final newBody = _stringFrom(data['body']);
@@ -1113,8 +1298,10 @@ class ChatCubit extends Cubit<ChatState> {
     final editedAtStr = _stringFrom(data['edited_at']);
     if (messageId == null || conversationId == null || newBody == null) return;
 
-    DateTime? editedAt = editedAtStr != null ? DateTime.tryParse(editedAtStr)?.toLocal() : DateTime.now();
-    
+    DateTime? editedAt = editedAtStr != null
+        ? DateTime.tryParse(editedAtStr)?.toLocal()
+        : DateTime.now();
+
     if (state.selectedChannel?.id == conversationId) {
       final updatedMessages = state.messages.map((m) {
         if (m.id == messageId) {
@@ -1129,8 +1316,14 @@ class ChatCubit extends Cubit<ChatState> {
       emit(state.copyWith(messages: updatedMessages));
     }
 
-    _repository.handleMessageEditedLocally(messageId, conversationId, newBody, isEdited, editedAt);
-    
+    _repository.handleMessageEditedLocally(
+      messageId,
+      conversationId,
+      newBody,
+      isEdited,
+      editedAt,
+    );
+
     refreshChatList();
   }
 
@@ -1139,7 +1332,8 @@ class ChatCubit extends Cubit<ChatState> {
     final data = raw['data'] is Map<String, dynamic>
         ? raw['data'] as Map<String, dynamic>
         : raw;
-    final userId = _stringFrom(data['user_id']) ?? _stringFrom(data['peer_user_id']);
+    final userId =
+        _stringFrom(data['user_id']) ?? _stringFrom(data['peer_user_id']);
     if (userId == null) return;
     final status = _stringFrom(data['status']);
     final lastSeenMs = data['last_seen'];
@@ -1177,12 +1371,15 @@ class ChatCubit extends Cubit<ChatState> {
       }
     }
     if (updated) {
-      final isSelectedPeer = state.selectedChannel?.peerUserId == userId ||
+      final isSelectedPeer =
+          state.selectedChannel?.peerUserId == userId ||
           state.selectedChannel?.id == 'channel_$userId';
-      emit(state.copyWith(
-        channels: channels,
-        isOnline: isSelectedPeer ? isOnline : state.isOnline,
-      ));
+      emit(
+        state.copyWith(
+          channels: channels,
+          isOnline: isSelectedPeer ? isOnline : state.isOnline,
+        ),
+      );
     }
   }
 
@@ -1224,20 +1421,87 @@ class ChatCubit extends Cubit<ChatState> {
     String audioPath,
     Duration audioDuration,
   ) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendAudioMessage(
-        channelId,
-        audioPath,
-        audioDuration,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_audio';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: '',
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.audio,
+      audioPath: audioPath,
+      audioDuration: audioDuration,
+      localFilePath: audioPath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: audioPath,
+        type: 'audio',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: '',
+          attachmentType: 'voice',
+          attachmentUrl: mediaUrl,
+          audioDuration: audioDuration,
+        );
+      }
+
+      final finalMessage = sent.copyWith(
+        localFilePath: audioPath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.updateChannelLastMessage(
+        channelId,
+        '\u{1F3A4} Voice message',
+      );
+
+      // Replace optimistic with uploaded message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 
@@ -1269,21 +1533,83 @@ class ChatCubit extends Cubit<ChatState> {
     String text = '',
     bool isViewOnce = false,
   }) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendImageMessage(
-        channelId,
-        imagePath,
-        text: text,
-        isViewOnce: isViewOnce,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_image';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: text,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.image,
+      isViewOnce: isViewOnce,
+      localFilePath: imagePath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: imagePath,
+        type: 'image',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'image',
+          attachmentUrl: mediaUrl,
+          isViewOnce: isViewOnce,
+        );
+      }
+
+      final finalMessage = sent.copyWith(
+        localFilePath: imagePath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
+
+      // Replace optimistic with uploaded message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 
@@ -1303,8 +1629,8 @@ class ChatCubit extends Cubit<ChatState> {
       final resolvedUrl = attachmentUrl.startsWith('http')
           ? attachmentUrl
           : attachmentUrl.startsWith('/')
-              ? '${AppConstants.apiBaseUrl}$attachmentUrl'
-              : '${AppConstants.apiBaseUrl}/$attachmentUrl';
+          ? '${AppConstants.apiBaseUrl}$attachmentUrl'
+          : '${AppConstants.apiBaseUrl}/$attachmentUrl';
 
       // Fetch image bytes with same auth as API so it loads reliably
       final bytes = await _repository.fetchImageBytes(resolvedUrl);
@@ -1321,13 +1647,34 @@ class ChatCubit extends Cubit<ChatState> {
       final updatedMessages = List<Message>.from(messages)..[idx] = updated;
       final paths = Map<String, String>.from(state.viewOnceLocalPaths)
         ..[messageId] = localPath;
-      emit(state.copyWith(
-        messages: updatedMessages,
-        viewOnceLocalPaths: paths,
-      ));
+      emit(
+        state.copyWith(messages: updatedMessages, viewOnceLocalPaths: paths),
+      );
     } catch (e) {
       emit(state.copyWith(error: e.toString()));
     }
+  }
+
+  /// Immediately transitions a view-once message to the expired state by
+  /// setting viewOnceOpenedAt far enough in the past. Called when the user
+  /// navigates back from the full-screen view-once viewer.
+  void expireViewOnceMessage(String messageId) {
+    final messages = state.messages;
+    final idx = messages.indexWhere((m) => m.id == messageId);
+    if (idx == -1) return;
+    final message = messages[idx];
+    if (!message.isViewOnce || message.isOutgoing) return;
+
+    final expiredAt = DateTime.now().subtract(const Duration(minutes: 5));
+    final updated = message.copyWith(viewOnceOpenedAt: expiredAt);
+    _repository.addOrUpdateMessage(updated);
+
+    final updatedMessages = List<Message>.from(messages)..[idx] = updated;
+    final paths = Map<String, String>.from(state.viewOnceLocalPaths)
+      ..remove(messageId);
+    emit(
+      state.copyWith(messages: updatedMessages, viewOnceLocalPaths: paths),
+    );
   }
 
   Future<void> sendVideoMessage(
@@ -1335,20 +1682,81 @@ class ChatCubit extends Cubit<ChatState> {
     String videoPath, {
     String text = '',
   }) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendVideoMessage(
-        channelId,
-        videoPath,
-        text: text,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: text,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.video,
+      localFilePath: videoPath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: videoPath,
+        type: 'video',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'video',
+          attachmentUrl: mediaUrl,
+        );
+      }
+
+      final finalMessage = sent.copyWith(
+        localFilePath: videoPath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.updateChannelLastMessage(channelId, '\u{1F3A5} Video');
+
+      // Replace optimistic with uploaded message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 
@@ -1649,25 +2057,23 @@ class ChatCubit extends Cubit<ChatState> {
 
   void _refreshChannelList() {
     try {
-      final chats = _repository
-          .getChannel(state.selectedChannel?.id ?? '')
-          ?.let((ch) {
-            final allChats = state.channels.map((c) {
-              if (c.id == ch.id) {
-                final repoChannel = _repository.getChannel(c.id) ?? c;
-                // Preserve isOnline/lastSeen from state (presence_update) since repo has stale data
-                return repoChannel.copyWith(
-                  isOnline: c.isOnline,
-                  lastSeen: c.lastSeen,
-                );
-              }
-              return c;
-            }).toList();
-            allChats.sort(
-              (a, b) => b.lastMessageTime.compareTo(a.lastMessageTime),
+      final chats = _repository.getChannel(state.selectedChannel?.id ?? '')?.let((
+        ch,
+      ) {
+        final allChats = state.channels.map((c) {
+          if (c.id == ch.id) {
+            final repoChannel = _repository.getChannel(c.id) ?? c;
+            // Preserve isOnline/lastSeen from state (presence_update) since repo has stale data
+            return repoChannel.copyWith(
+              isOnline: c.isOnline,
+              lastSeen: c.lastSeen,
             );
-            return allChats;
-          });
+          }
+          return c;
+        }).toList();
+        allChats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
+        return allChats;
+      });
       if (chats != null && !isClosed) {
         emit(state.copyWith(channels: chats));
       }
@@ -1820,6 +2226,11 @@ class ChatCubit extends Cubit<ChatState> {
     final deleted = message.copyWith(
       text: 'message deleted',
       isEdited: false,
+      type: MessageType.text,
+      replyToMessageId: '',
+      replyToSenderId: '',
+      replyToBody: '',
+      replyToAttachmentType: '',
     );
     _repository.addOrUpdateMessage(deleted);
     _replaceMessageInState(deleted);
@@ -1838,7 +2249,8 @@ class ChatCubit extends Cubit<ChatState> {
 
   /// Sends typing_start (re-send on each keystroke to reset server 4s TTL).
   void sendTypingStart(String channelId) {
-    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+    final peerUserId =
+        _repository.getChannel(channelId)?.peerUserId ??
         (channelId.startsWith('channel_')
             ? channelId.replaceFirst('channel_', '')
             : null);
@@ -1852,7 +2264,8 @@ class ChatCubit extends Cubit<ChatState> {
 
   /// Sends typing_stop when input cleared, message sent, or screen left.
   void sendTypingStop(String channelId) {
-    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+    final peerUserId =
+        _repository.getChannel(channelId)?.peerUserId ??
         (channelId.startsWith('channel_')
             ? channelId.replaceFirst('channel_', '')
             : null);
@@ -1866,7 +2279,8 @@ class ChatCubit extends Cubit<ChatState> {
 
   /// Sends recording_start when user starts recording voice note.
   void sendRecordingStart(String channelId) {
-    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+    final peerUserId =
+        _repository.getChannel(channelId)?.peerUserId ??
         (channelId.startsWith('channel_')
             ? channelId.replaceFirst('channel_', '')
             : null);
@@ -1880,7 +2294,8 @@ class ChatCubit extends Cubit<ChatState> {
 
   /// Sends recording_stop when user stops/cancels/sends voice note.
   void sendRecordingStop(String channelId) {
-    final peerUserId = _repository.getChannel(channelId)?.peerUserId ??
+    final peerUserId =
+        _repository.getChannel(channelId)?.peerUserId ??
         (channelId.startsWith('channel_')
             ? channelId.replaceFirst('channel_', '')
             : null);
@@ -1937,6 +2352,77 @@ class ChatCubit extends Cubit<ChatState> {
     if (v == null) return null;
     if (v is String) return v.isEmpty ? null : v;
     return v.toString();
+  }
+
+  static Duration? _parseAudioDurationFromPayload(Map<String, dynamic> data) {
+    int? parsePositiveInt(dynamic raw) {
+      if (raw == null) return null;
+      if (raw is int) return raw > 0 ? raw : null;
+      if (raw is num) {
+        final value = raw.toInt();
+        return value > 0 ? value : null;
+      }
+      if (raw is String) {
+        final value = int.tryParse(raw);
+        if (value != null && value > 0) return value;
+      }
+      return null;
+    }
+
+    Duration? parseFromMap(Map<String, dynamic> map) {
+      const msKeys = [
+        'audio_duration_ms',
+        'voice_duration_ms',
+        'duration_ms',
+        'audioDurationMs',
+        'voiceDurationMs',
+        'durationMs',
+      ];
+      for (final key in msKeys) {
+        final value = parsePositiveInt(map[key]);
+        if (value != null) {
+          return Duration(milliseconds: value);
+        }
+      }
+
+      const secKeys = [
+        'audio_duration',
+        'voice_duration',
+        'duration',
+        'audioDuration',
+        'voiceDuration',
+      ];
+      for (final key in secKeys) {
+        final value = parsePositiveInt(map[key]);
+        if (value == null) continue;
+        // Plain fields are usually seconds; very large values are likely ms.
+        if (value <= 600) {
+          return Duration(seconds: value);
+        }
+        return Duration(milliseconds: value);
+      }
+
+      return null;
+    }
+
+    final direct = parseFromMap(data);
+    if (direct != null) return direct;
+
+    for (final nestedKey in const [
+      'metadata',
+      'attachment_metadata',
+      'audio',
+      'voice',
+      'attachment',
+    ]) {
+      final nested = data[nestedKey];
+      if (nested is Map<String, dynamic>) {
+        final nestedDuration = parseFromMap(nested);
+        if (nestedDuration != null) return nestedDuration;
+      }
+    }
+
+    return null;
   }
 }
 

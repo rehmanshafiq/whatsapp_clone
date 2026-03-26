@@ -1,5 +1,10 @@
 import 'dart:convert';
+import 'dart:async';
+import 'dart:math' as math;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/physics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -12,22 +17,76 @@ import '../../core/theme/app_theme.dart';
 import '../../core/constants/app_constants.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
+import '../screens/media_viewer_screen.dart';
 import 'audio_message_bubble.dart';
 import 'document_message_bubble.dart';
 import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
+import 'message_action_sheet.dart';
+import 'forwarded_label.dart';
 
-/// Display text for message body. "message deleted" -> "This message was deleted".
+/// Canonical body marker for soft-deleted messages.
+const String _deletedMessageMarker = 'message deleted';
+
+/// True when body indicates a deleted message (accept legacy display text too).
+bool _isDeletedMessage(String body) {
+  final normalized = body.trim().toLowerCase();
+  return normalized == _deletedMessageMarker ||
+      normalized == 'this message was deleted';
+}
+
+/// Display text for message body. Keep one user-facing phrase.
 String _messageDisplayText(String body) =>
-    body == 'message deleted' ? 'This message was deleted' : body;
+    _isDeletedMessage(body) ? 'This message was deleted' : body;
 
-/// True when body indicates a deleted message (show in italic).
-bool _isDeletedMessage(String body) => body == 'message deleted';
+/// Renders normal message text, or a WhatsApp-like deleted-message row.
+Widget _buildMessageBodyText(
+  String body, {
+  required TextStyle normalStyle,
+  Color? deletedColor,
+}) {
+  final displayText = _messageDisplayText(body);
+  if (!_isDeletedMessage(body)) {
+    return Text(displayText, style: normalStyle);
+  }
+
+  final effectiveDeletedColor =
+      (deletedColor ?? normalStyle.color ?? AppColors.textSecondary).withValues(
+        alpha: 0.85,
+      );
+  final deletedStyle = normalStyle.copyWith(
+    color: effectiveDeletedColor,
+    fontStyle: FontStyle.italic,
+  );
+  final iconSize = (deletedStyle.fontSize ?? 15) - 1;
+
+  return Text.rich(
+    TextSpan(
+      children: [
+        WidgetSpan(
+          alignment: PlaceholderAlignment.middle,
+          child: Padding(
+            padding: const EdgeInsets.only(right: 4),
+            child: Icon(
+              Icons.block,
+              size: iconSize < 12 ? 12 : iconSize,
+              color: effectiveDeletedColor,
+            ),
+          ),
+        ),
+        TextSpan(text: displayText),
+      ],
+    ),
+    style: deletedStyle,
+  );
+}
 
 /// View-once image is considered expired 60 seconds after opening.
 bool _isViewOnceExpired(DateTime? viewOnceOpenedAt) {
   if (viewOnceOpenedAt == null) return false;
-  return viewOnceOpenedAt.add(const Duration(seconds: 60)).isBefore(DateTime.now());
+  return viewOnceOpenedAt
+      .add(const Duration(seconds: 2))
+      .isBefore(DateTime.now());
 }
 
 /// Backend may return server-relative media URLs like `/uploads/...`.
@@ -116,10 +175,7 @@ Widget _buildMediaContent(
             const SizedBox(height: 6),
             Text(
               'View once photo',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-              ),
+              style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
             ),
           ],
         ),
@@ -128,62 +184,43 @@ Widget _buildMediaContent(
   }
 
   // View-once: recipient not opened -> tap to view placeholder
-  if (message.isViewOnce &&
-      !isOutgoing &&
-      message.viewOnceOpenedAt == null) {
-    return GestureDetector(
-      onTap: () => context.read<ChatCubit>().openViewOnceMessage(message.id),
-      child: Container(
-        width: isSticker ? stickerSize : placeholderSize,
-        height: isSticker ? stickerSize : placeholderSize,
-        decoration: BoxDecoration(
-          color: AppColors.appBar,
-          borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              Icons.visibility,
-              color: AppColors.textSecondary,
-              size: 40,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Tap to view',
-              style: TextStyle(
-                color: AppColors.textSecondary,
-                fontSize: 13,
-              ),
-            ),
-            Text(
-              'View once photo',
-              style: TextStyle(
-                color: AppColors.textSecondary.withValues(alpha: 0.7),
-                fontSize: 11,
-              ),
-            ),
-          ],
-        ),
-      ),
+  if (message.isViewOnce && !isOutgoing && message.viewOnceOpenedAt == null) {
+    return _ViewOnceTapToView(
+      message: message,
+      isSticker: isSticker,
+      placeholderSize: placeholderSize,
+      stickerSize: stickerSize,
     );
   }
 
   // View-once: recipient opened, not expired, and we have local file (fetched with auth)
-  final viewOnceLocalPath = message.isViewOnce &&
+  final viewOnceLocalPath =
+      message.isViewOnce &&
           !isOutgoing &&
           message.viewOnceOpenedAt != null &&
           !_isViewOnceExpired(message.viewOnceOpenedAt)
       ? context.read<ChatCubit>().state.viewOnceLocalPaths[message.id]
       : null;
   if (viewOnceLocalPath != null) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
-      child: Image.file(
-        File(viewOnceLocalPath),
-        width: isSticker ? stickerSize : null,
-        height: isSticker ? stickerSize : null,
-        fit: isSticker ? BoxFit.contain : BoxFit.cover,
+    return GestureDetector(
+      onTap: () {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MediaViewerScreen(
+              localFilePath: viewOnceLocalPath,
+              isViewOnce: true,
+            ),
+          ),
+        );
+      },
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
+        child: Image.file(
+          File(viewOnceLocalPath),
+          width: isSticker ? stickerSize : null,
+          height: isSticker ? stickerSize : null,
+          fit: isSticker ? BoxFit.contain : BoxFit.cover,
+        ),
       ),
     );
   }
@@ -193,7 +230,9 @@ Widget _buildMediaContent(
       !isOutgoing &&
       message.viewOnceOpenedAt != null &&
       _isViewOnceExpired(message.viewOnceOpenedAt)) {
-    const expiredMutedColor = Color(0xFFA89888); // Muted light-tan for icon & text
+    const expiredMutedColor = Color(
+      0xFFA89888,
+    ); // Muted light-tan for icon & text
     return Container(
       width: isSticker ? stickerSize : placeholderSize,
       height: isSticker ? stickerSize : placeholderSize,
@@ -237,9 +276,7 @@ Widget _buildMediaContent(
   }
 
   // View-once: sender — recipient has opened → show "Opened" (WhatsApp-style)
-  if (message.isViewOnce &&
-      isOutgoing &&
-      message.viewOnceOpenedAt != null) {
+  if (message.isViewOnce && isOutgoing && message.viewOnceOpenedAt != null) {
     return Container(
       width: isSticker ? stickerSize : placeholderSize,
       height: isSticker ? stickerSize : placeholderSize,
@@ -273,15 +310,17 @@ Widget _buildMediaContent(
   }
 
   // Show image (view-once sender not yet opened, or opened recipient within 60s, or normal image)
-  if (message.mediaUrl != null) {
-    final isOurApiUrl = resolvedMediaUrl != null &&
+  final hasMediaOrLocal = message.mediaUrl != null || message.localFilePath != null;
+  if (hasMediaOrLocal) {
+    final isOurApiUrl =
+        resolvedMediaUrl != null &&
         resolvedMediaUrl.startsWith('http') &&
         resolvedMediaUrl.contains(AppConstants.apiBaseUrl);
     final httpHeaders = isOurApiUrl
         ? context.read<ChatCubit>().authHeadersForMedia
         : null;
 
-    return ClipRRect(
+    Widget imageWidget = ClipRRect(
       borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
       child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
           ? CachedNetworkImage(
@@ -306,11 +345,45 @@ Widget _buildMediaContent(
               ),
             )
           : Image.file(
-              File(message.mediaUrl!),
+              File(resolvedMediaUrl ?? message.localFilePath!),
               width: isSticker ? stickerSize : null,
               height: isSticker ? stickerSize : null,
               fit: isSticker ? BoxFit.contain : BoxFit.cover,
             ),
+    );
+
+    // Overlay for uploading state
+    if (message.isUploading) {
+      imageWidget = Stack(
+        alignment: Alignment.center,
+        children: [
+          imageWidget,
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            strokeWidth: 3,
+          ),
+        ],
+      );
+    }
+
+    if (isSticker || message.isViewOnce) return imageWidget;
+
+    return GestureDetector(
+      onTap: () {
+        if (message.isUploading) return;
+        final isLocal = resolvedMediaUrl == null ||
+            !resolvedMediaUrl.startsWith('http');
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => MediaViewerScreen(
+              networkUrl: isLocal ? null : resolvedMediaUrl,
+              localFilePath: isLocal ? (message.mediaUrl ?? message.localFilePath) : null,
+              httpHeaders: httpHeaders,
+            ),
+          ),
+        );
+      },
+      child: imageWidget,
     );
   }
 
@@ -358,21 +431,11 @@ class MessageBubble extends StatelessWidget {
       alignment: message.isOutgoing
           ? Alignment.centerRight
           : Alignment.centerLeft,
-      config: ChatReactionsConfig(
-        availableReactions: const ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
+      config: const ChatReactionsConfig(
+        availableReactions: ['👍', '❤️', '😂', '😮', '😢', '🙏', '➕'],
         enableHapticFeedback: true,
-        showContextMenu: true,
+        showContextMenu: false,
         dialogBackgroundColor: AppColors.appBar,
-        menuItems: const [
-          MenuItem(label: 'Reply', icon: Icons.reply),
-          MenuItem(label: 'Copy', icon: Icons.copy),
-          MenuItem(label: 'Forward', icon: Icons.forward),
-          MenuItem(
-            label: 'Delete',
-            icon: Icons.delete_forever,
-            isDestructive: true,
-          ),
-        ],
       ),
       onReactionAdded: (reaction) {
         reactionsController.addReaction(message.id, reaction);
@@ -384,199 +447,174 @@ class MessageBubble extends StatelessWidget {
         context.read<ChatCubit>().removeReaction(message.id, reaction);
         onReactionChanged?.call();
       },
-      onMenuItemTapped: (item) async {
-        await _handleMenuTap(context, item, message);
-      },
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: message.isOutgoing
-            ? CrossAxisAlignment.end
-            : CrossAxisAlignment.start,
-        children: [
-          bubble,
-          if (message.reactions.isNotEmpty)
-            Padding(
-              padding: EdgeInsets.only(
-                left: message.isOutgoing ? 64 : 8,
-                right: message.isOutgoing ? 8 : 64,
-                top: 2,
+      child: _SwipeableMessage(
+        enabled: !message.isAudio,
+        isOutgoing: message.isOutgoing,
+        onSwipeComplete: () => MessageActionSheet.show(context, message),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: message.isOutgoing
+              ? CrossAxisAlignment.end
+              : CrossAxisAlignment.start,
+          children: [
+            bubble,
+            if (message.reactions.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(
+                  left: message.isOutgoing ? 64 : 8,
+                  right: message.isOutgoing ? 8 : 64,
+                  top: 2,
+                ),
+                child: _ReactionRow(reactions: message.reactions),
               ),
-              child: _ReactionRow(reactions: message.reactions),
-            ),
-        ],
+          ],
+        ),
       ),
     );
   }
 }
 
-Future<void> _handleMenuTap(
-  BuildContext context,
-  MenuItem item,
-  Message message,
-) async {
-  final cubit = context.read<ChatCubit>();
-  final action = item.label.trim().toLowerCase();
-  if (action == 'reply' || action.contains('reply')) {
-    cubit.startReplyTo(message);
-    return;
-  }
-  if (action == 'copy' || action.contains('copy')) {
-    await cubit.copyMessageToClipboard(message);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Message copied')),
-    );
-    return;
-  }
-  if (action == 'delete' || action.contains('delete')) {
-    if (!message.isOutgoing) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('You can only delete your own messages')),
-      );
-      return;
-    }
-    await cubit.deleteMessage(message);
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Message deleted')),
-    );
-    return;
-  }
-  if (action == 'forward' || action.contains('forward')) {
-    final channelIds = await _showForwardPicker(context, message.channelId);
-    if (channelIds.isEmpty) return;
-    await cubit.forwardMessageToChannels(message, channelIds);
-    if (!context.mounted) return;
-    final label = channelIds.length == 1
-        ? 'Forwarded to 1 chat'
-        : 'Forwarded to ${channelIds.length} chats';
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(label)));
-  }
+class _SwipeableMessage extends StatefulWidget {
+  final bool enabled;
+  final bool isOutgoing;
+  final VoidCallback onSwipeComplete;
+  final Widget child;
+
+  const _SwipeableMessage({
+    required this.enabled,
+    required this.isOutgoing,
+    required this.onSwipeComplete,
+    required this.child,
+  });
+
+  @override
+  State<_SwipeableMessage> createState() => _SwipeableMessageState();
 }
 
-Future<List<String>> _showForwardPicker(
-  BuildContext context,
-  String currentChannelId,
-) async {
-  final cubit = context.read<ChatCubit>();
-  final channels = cubit.state.channels
-      .where((c) => c.id != currentChannelId)
-      .toList()
-    ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-  if (channels.isEmpty) return const <String>[];
+class _SwipeableMessageState extends State<_SwipeableMessage>
+    with SingleTickerProviderStateMixin {
+  static const double _triggerThreshold = 64.0;
+  static const double _maxDrag = 100.0;
 
-  final selected = <String>{};
-  final result = await showModalBottomSheet<List<String>>(
-    context: context,
-    isScrollControlled: true,
-    backgroundColor: AppColors.appBar,
-    shape: const RoundedRectangleBorder(
-      borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-    ),
-    builder: (ctx) {
-      return SafeArea(
-        top: false,
-        child: StatefulBuilder(
-          builder: (ctx, setModalState) {
-            return SizedBox(
-              height: MediaQuery.of(ctx).size.height * 0.72,
-              child: Column(
-                children: [
-                  const SizedBox(height: 8),
-                  Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: AppColors.divider,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Forward to...',
-                            style: TextStyle(
-                              color: AppColors.textPrimary,
-                              fontSize: 18,
-                              fontWeight: FontWeight.w600,
-                            ),
+  late final AnimationController _controller;
+  double _dragExtent = 0;
+  bool _hapticFired = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      lowerBound: 0,
+      upperBound: _maxDrag,
+      value: 0,
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDragUpdate(DragUpdateDetails details) {
+    final dx = details.delta.dx;
+    _dragExtent = (_dragExtent + dx).clamp(0.0, double.infinity);
+    _controller.value = math.min(_dragExtent, _maxDrag);
+
+    if (!_hapticFired && _dragExtent >= _triggerThreshold) {
+      _hapticFired = true;
+      HapticFeedback.mediumImpact();
+    }
+  }
+
+  void _onDragEnd(DragEndDetails details) {
+    _finishSwipe();
+  }
+
+  void _onDragCancel() {
+    _finishSwipe();
+  }
+
+  void _finishSwipe() {
+    final triggered = _dragExtent >= _triggerThreshold;
+    _dragExtent = 0;
+    _hapticFired = false;
+
+    if (_controller.value == 0) {
+      if (triggered && mounted) widget.onSwipeComplete();
+      return;
+    }
+
+    final springDesc = SpringDescription(mass: 1, stiffness: 300, damping: 22);
+    final simulation = SpringSimulation(springDesc, _controller.value, 0, 0);
+    _controller.animateWith(simulation).then((_) {
+      if (triggered && mounted) {
+        widget.onSwipeComplete();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!widget.enabled) return widget.child;
+
+    return GestureDetector(
+      onHorizontalDragUpdate: _onDragUpdate,
+      onHorizontalDragEnd: _onDragEnd,
+      onHorizontalDragCancel: _onDragCancel,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final dx = _controller.value;
+          final progress = (dx / _triggerThreshold).clamp(0.0, 1.0);
+
+          return Stack(
+            clipBehavior: Clip.none,
+            children: [
+              Positioned(
+                left: widget.isOutgoing ? null : 4,
+                right: widget.isOutgoing ? 4 : null,
+                top: 0,
+                bottom: 0,
+                child: Align(
+                  alignment: Alignment.center,
+                  child: Opacity(
+                    opacity: progress,
+                    child: Transform.scale(
+                      scale: 0.4 + progress * 0.6,
+                      child: Container(
+                        width: 34,
+                        height: 34,
+                        decoration: BoxDecoration(
+                          color: AppColors.accent.withValues(
+                            alpha: 0.18 + progress * 0.22,
+                          ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.reply,
+                          size: 18,
+                          color: AppColors.accent.withValues(
+                            alpha: 0.5 + progress * 0.5,
                           ),
                         ),
-                        Text(
-                          '${selected.length} selected',
-                          style: const TextStyle(color: AppColors.textSecondary),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Expanded(
-                    child: ListView.separated(
-                      itemCount: channels.length,
-                      separatorBuilder: (_, __) => Divider(
-                        color: AppColors.divider.withValues(alpha: 0.5),
-                        height: 1,
-                        indent: 76,
-                      ),
-                      itemBuilder: (_, index) {
-                        final channel = channels[index];
-                        final checked = selected.contains(channel.id);
-                        return CheckboxListTile(
-                          value: checked,
-                          onChanged: (_) {
-                            setModalState(() {
-                              if (checked) {
-                                selected.remove(channel.id);
-                              } else {
-                                selected.add(channel.id);
-                              }
-                            });
-                          },
-                          title: Text(
-                            channel.name,
-                            style: const TextStyle(color: AppColors.textPrimary),
-                          ),
-                          subtitle: Text(
-                            channel.lastMessage,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style:
-                                const TextStyle(color: AppColors.textSecondary),
-                          ),
-                          activeColor: AppColors.accent,
-                          checkColor: Colors.white,
-                        );
-                      },
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-                    child: SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: selected.isEmpty
-                            ? null
-                            : () {
-                                Navigator.of(ctx).pop(selected.toList());
-                              },
-                        icon: const Icon(Icons.forward),
-                        label: const Text('Forward'),
                       ),
                     ),
                   ),
-                ],
+                ),
               ),
-            );
-          },
-        ),
-      );
-    },
-  );
-  return result ?? const <String>[];
+              Transform.translate(
+                offset: Offset(dx, 0),
+                child: child,
+              ),
+            ],
+          );
+        },
+        child: widget.child,
+      ),
+    );
+  }
 }
 
 class _ContactMessageBubble extends StatelessWidget {
@@ -634,6 +672,8 @@ class _ContactMessageBubble extends StatelessWidget {
                   attachmentType: message.replyToAttachmentType,
                   isOutgoing: message.isOutgoing,
                 ),
+              if (message.isForwarded)
+                const ForwardedLabel(),
               Row(
                 children: [
                   _ContactThumb(message: message),
@@ -873,17 +913,15 @@ class _LocationMessageWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bubble = LocationMessageBubble(message: message);
-    if (message.replyToMessageId == null) {
-      return GestureDetector(
-        onTap: () => _openInMaps(context),
-        child: bubble,
-      );
+    if (message.replyToMessageId == null && !message.isForwarded) {
+      return GestureDetector(onTap: () => _openInMaps(context), child: bubble);
     }
     return GestureDetector(
       onTap: () => _openInMaps(context),
       child: Align(
-        alignment:
-            message.isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        alignment: message.isOutgoing
+            ? Alignment.centerRight
+            : Alignment.centerLeft,
         child: Container(
           margin: EdgeInsets.only(
             left: message.isOutgoing ? 64 : 8,
@@ -907,12 +945,15 @@ class _LocationMessageWrapper extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _ReplyPreview(
-                senderId: message.replyToSenderId,
-                previewText: message.replyToBody,
-                attachmentType: message.replyToAttachmentType,
-                isOutgoing: message.isOutgoing,
-              ),
+              if (message.replyToMessageId != null)
+                _ReplyPreview(
+                  senderId: message.replyToSenderId,
+                  previewText: message.replyToBody,
+                  attachmentType: message.replyToAttachmentType,
+                  isOutgoing: message.isOutgoing,
+                ),
+              if (message.isForwarded)
+                const ForwardedLabel(),
               bubble,
             ],
           ),
@@ -1029,13 +1070,18 @@ class _ReplyPreview extends StatelessWidget {
   Widget build(BuildContext context) {
     final cubit = context.read<ChatCubit>();
     final myBackendId = cubit.repository.getCurrentUserId();
-    final isMe = senderId == AppConstants.currentUserId ||
-        (myBackendId != null && myBackendId.isNotEmpty && senderId == myBackendId);
+    final isMe =
+        senderId == AppConstants.currentUserId ||
+        (myBackendId != null &&
+            myBackendId.isNotEmpty &&
+            senderId == myBackendId);
     final String name;
     if (isMe) {
       name = 'You';
     } else if (senderId == null || senderId!.isEmpty) {
-      name = isOutgoing ? 'You' : (cubit.state.selectedChannel?.name ?? 'Unknown');
+      name = isOutgoing
+          ? 'You'
+          : (cubit.state.selectedChannel?.name ?? 'Unknown');
     } else {
       name = cubit.state.selectedChannel?.name ?? senderId!;
     }
@@ -1121,6 +1167,7 @@ class _TextMessageBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isOutgoing = message.isOutgoing;
+    final isDeletedMessage = _isDeletedMessage(message.text);
     final period = message.timestamp.hour >= 12 ? 'PM' : 'AM';
     final hourRaw = message.timestamp.hour % 12;
     final time =
@@ -1154,23 +1201,25 @@ class _TextMessageBubble extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
-            if (message.replyToMessageId != null)
+            if (!isDeletedMessage &&
+                message.replyToMessageId != null &&
+                message.replyToMessageId!.isNotEmpty)
               _ReplyPreview(
                 senderId: message.replyToSenderId,
                 previewText: message.replyToBody,
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
               ),
-            Text(
-              _messageDisplayText(message.text),
-              style: TextStyle(
+            if (message.isForwarded && !isDeletedMessage)
+              const ForwardedLabel(),
+            _buildMessageBodyText(
+              message.text,
+              normalStyle: const TextStyle(
                 color: AppColors.textPrimary,
                 fontSize: 15,
                 height: 1.3,
-                fontStyle: _isDeletedMessage(message.text)
-                    ? FontStyle.italic
-                    : FontStyle.normal,
               ),
+              deletedColor: AppColors.textSecondary,
             ),
             const SizedBox(height: 2),
             Row(
@@ -1262,6 +1311,8 @@ class _MediaMessageBubble extends StatelessWidget {
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
               ),
+            if (!isSticker && message.isForwarded)
+              const ForwardedLabel(),
             _buildMediaContent(
               context,
               message: message,
@@ -1275,16 +1326,14 @@ class _MediaMessageBubble extends StatelessWidget {
                 message.text != '\u{1F4F7} Photo')
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-                child: Text(
-                  _messageDisplayText(message.text),
-                  style: TextStyle(
+                child: _buildMessageBodyText(
+                  message.text,
+                  normalStyle: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
                     height: 1.3,
-                    fontStyle: _isDeletedMessage(message.text)
-                        ? FontStyle.italic
-                        : FontStyle.normal,
                   ),
+                  deletedColor: AppColors.textSecondary,
                 ),
               ),
             if (!isSticker) const SizedBox(height: 2),
@@ -1344,7 +1393,8 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
   }
 
   Future<void> _initVideo() async {
-    final url = _resolveMediaUrl(widget.message.mediaUrl);
+    final rawUrl = widget.message.mediaUrl ?? widget.message.localFilePath;
+    final url = _resolveMediaUrl(rawUrl);
     if (url == null) return;
 
     try {
@@ -1414,60 +1464,73 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                 attachmentType: widget.message.replyToAttachmentType,
                 isOutgoing: widget.message.isOutgoing,
               ),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(8),
-              child: _error
-                  ? Container(
-                      height: 200,
-                      color: Colors.black12,
-                      child: const Center(child: Icon(Icons.error_outline)),
-                    )
-                  : _initialized
-                  ? Stack(
-                      alignment: Alignment.center,
-                      children: [
-                        AspectRatio(
-                          aspectRatio: _controller!.value.aspectRatio,
-                          child: VideoPlayer(_controller!),
-                        ),
-                        GestureDetector(
-                          onTap: () {
-                            setState(() {
-                              _controller!.value.isPlaying
-                                  ? _controller!.pause()
-                                  : _controller!.play();
-                            });
-                          },
-                          child: CircleAvatar(
-                            backgroundColor: Colors.black45,
-                            child: Icon(
-                              _controller!.value.isPlaying
-                                  ? Icons.pause
-                                  : Icons.play_arrow,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ],
-                    )
-                  : Container(
-                      height: 200,
-                      color: Colors.black12,
-                      child: const Center(child: CircularProgressIndicator()),
+            if (widget.message.isForwarded)
+              const ForwardedLabel(),
+            GestureDetector(
+              onTap: () {
+                if (!_initialized || _error || widget.message.isUploading) return;
+                _controller?.pause();
+                final rawUrl = widget.message.mediaUrl ?? widget.message.localFilePath;
+                final url = _resolveMediaUrl(rawUrl);
+                final isLocal = url != null && !url.startsWith('http');
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => MediaViewerScreen(
+                      networkUrl: isLocal ? null : url,
+                      localFilePath: isLocal ? url : null,
+                      isVideo: true,
                     ),
+                  ),
+                );
+              },
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: _error
+                    ? Container(
+                        height: 200,
+                        color: Colors.black12,
+                        child: const Center(child: Icon(Icons.error_outline)),
+                      )
+                    : _initialized
+                    ? Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          AspectRatio(
+                            aspectRatio: _controller!.value.aspectRatio,
+                            child: VideoPlayer(_controller!),
+                          ),
+                          if (widget.message.isUploading)
+                            const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              strokeWidth: 3,
+                            )
+                          else
+                            const CircleAvatar(
+                              backgroundColor: Colors.black45,
+                              child: Icon(
+                                Icons.play_arrow,
+                                color: Colors.white,
+                              ),
+                            ),
+                        ],
+                      )
+                    : Container(
+                        height: 200,
+                        color: Colors.black12,
+                        child: const Center(child: CircularProgressIndicator()),
+                      ),
+              ),
             ),
             if (widget.message.text.isNotEmpty)
               Padding(
                 padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
-                child: Text(
-                  _messageDisplayText(widget.message.text),
-                  style: TextStyle(
+                child: _buildMessageBodyText(
+                  widget.message.text,
+                  normalStyle: const TextStyle(
                     color: AppColors.textPrimary,
                     fontSize: 15,
-                    fontStyle: _isDeletedMessage(widget.message.text)
-                        ? FontStyle.italic
-                        : FontStyle.normal,
                   ),
+                  deletedColor: AppColors.textSecondary,
                 ),
               ),
             const SizedBox(height: 2),
@@ -1500,6 +1563,104 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _ViewOnceTapToView extends StatefulWidget {
+  final Message message;
+  final bool isSticker;
+  final double placeholderSize;
+  final double stickerSize;
+
+  const _ViewOnceTapToView({
+    required this.message,
+    required this.isSticker,
+    required this.placeholderSize,
+    required this.stickerSize,
+  });
+
+  @override
+  State<_ViewOnceTapToView> createState() => _ViewOnceTapToViewState();
+}
+
+class _ViewOnceTapToViewState extends State<_ViewOnceTapToView> {
+  bool _opening = false;
+
+  Future<void> _openAndView() async {
+    if (_opening) return;
+    setState(() => _opening = true);
+
+    final cubit = context.read<ChatCubit>();
+    await cubit.openViewOnceMessage(widget.message.id);
+
+    if (!mounted) return;
+
+    final localPath = cubit.state.viewOnceLocalPaths[widget.message.id];
+    if (localPath == null) {
+      setState(() => _opening = false);
+      return;
+    }
+
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => MediaViewerScreen(
+          localFilePath: localPath,
+          isViewOnce: true,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    cubit.expireViewOnceMessage(widget.message.id);
+    setState(() => _opening = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = widget.isSticker ? widget.stickerSize : widget.placeholderSize;
+    return GestureDetector(
+      onTap: _openAndView,
+      child: Container(
+        width: size,
+        height: size,
+        decoration: BoxDecoration(
+          color: AppColors.appBar,
+          borderRadius: BorderRadius.circular(widget.isSticker ? 0 : 8),
+        ),
+        child: _opening
+            ? const Center(
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  color: AppColors.accent,
+                ),
+              )
+            : Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(
+                    Icons.visibility,
+                    color: AppColors.textSecondary,
+                    size: 40,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Tap to view',
+                    style: TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 13,
+                    ),
+                  ),
+                  Text(
+                    'View once photo',
+                    style: TextStyle(
+                      color: AppColors.textSecondary.withValues(alpha: 0.7),
+                      fontSize: 11,
+                    ),
+                  ),
+                ],
+              ),
       ),
     );
   }

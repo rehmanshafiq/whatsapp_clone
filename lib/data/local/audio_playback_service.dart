@@ -62,7 +62,9 @@ class AudioPlaybackService {
   /// Recreate the player to clear any stuck error state.
   Future<void> _resetPlayer() async {
     _detachListeners();
-    try { await _player.dispose(); } catch (_) {}
+    try {
+      await _player.dispose();
+    } catch (_) {}
     _player = AudioPlayer();
     _attachListeners();
   }
@@ -97,6 +99,9 @@ class AudioPlaybackService {
 
     await _safeCall(() => _player.stop());
     _currentlyPlayingId = messageId;
+    // Ensure UI starts each new track from the beginning and does not reuse
+    // stale position from a previously played message.
+    _positionController.add(Duration.zero);
     _playingIdController.add(messageId);
 
     try {
@@ -115,6 +120,7 @@ class AudioPlaybackService {
 
   Future<void> stop() async {
     await _safeCall(() => _player.stop());
+    _positionController.add(Duration.zero);
     _currentlyPlayingId = null;
     _playingIdController.add(null);
   }
@@ -127,10 +133,20 @@ class AudioPlaybackService {
     await _safeCall(() => _player.setPlaybackRate(rate));
   }
 
+  Future<Duration?> getDuration() async {
+    try {
+      return await _player.getDuration();
+    } catch (_) {
+      return null;
+    }
+  }
+
   PlayerState get state => _player.state;
 
   Future<void> _safeCall(Future<void> Function() fn) async {
-    try { await fn(); } catch (_) {}
+    try {
+      await fn();
+    } catch (_) {}
   }
 
   void dispose() {
