@@ -15,6 +15,7 @@ import '../../data/local/audio_playback_service.dart';
 import '../../data/models/message.dart';
 import 'message_action_sheet.dart';
 import 'message_status_icon.dart';
+import 'forwarded_label.dart';
 
 class AudioMessageBubble extends StatefulWidget {
   final Message message;
@@ -355,16 +356,22 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
           bottomRight: Radius.circular(isOutgoing ? 0 : 12),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _PlayPauseButton(
-            isPlaying: _isPlaying,
-            onTap: _togglePlayback,
-            isOutgoing: isOutgoing,
-          ),
-          const SizedBox(width: 8),
-          Expanded(
+          if (widget.message.isForwarded)
+            const ForwardedLabel(),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _PlayPauseButton(
+                isPlaying: _isPlaying,
+                onTap: _togglePlayback,
+                isOutgoing: isOutgoing,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
@@ -434,6 +441,8 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
             ),
           ),
         ],
+      ),
+      ],
       ),
     );
 

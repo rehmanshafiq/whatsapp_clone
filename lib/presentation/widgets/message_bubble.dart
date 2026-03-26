@@ -23,6 +23,7 @@ import 'document_message_bubble.dart';
 import 'location_message_bubble.dart';
 import 'message_status_icon.dart';
 import 'message_action_sheet.dart';
+import 'forwarded_label.dart';
 
 /// Canonical body marker for soft-deleted messages.
 const String _deletedMessageMarker = 'message deleted';
@@ -671,6 +672,8 @@ class _ContactMessageBubble extends StatelessWidget {
                   attachmentType: message.replyToAttachmentType,
                   isOutgoing: message.isOutgoing,
                 ),
+              if (message.isForwarded)
+                const ForwardedLabel(),
               Row(
                 children: [
                   _ContactThumb(message: message),
@@ -910,7 +913,7 @@ class _LocationMessageWrapper extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final bubble = LocationMessageBubble(message: message);
-    if (message.replyToMessageId == null) {
+    if (message.replyToMessageId == null && !message.isForwarded) {
       return GestureDetector(onTap: () => _openInMaps(context), child: bubble);
     }
     return GestureDetector(
@@ -942,12 +945,15 @@ class _LocationMessageWrapper extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              _ReplyPreview(
-                senderId: message.replyToSenderId,
-                previewText: message.replyToBody,
-                attachmentType: message.replyToAttachmentType,
-                isOutgoing: message.isOutgoing,
-              ),
+              if (message.replyToMessageId != null)
+                _ReplyPreview(
+                  senderId: message.replyToSenderId,
+                  previewText: message.replyToBody,
+                  attachmentType: message.replyToAttachmentType,
+                  isOutgoing: message.isOutgoing,
+                ),
+              if (message.isForwarded)
+                const ForwardedLabel(),
               bubble,
             ],
           ),
@@ -1204,6 +1210,8 @@ class _TextMessageBubble extends StatelessWidget {
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
               ),
+            if (message.isForwarded && !isDeletedMessage)
+              const ForwardedLabel(),
             _buildMessageBodyText(
               message.text,
               normalStyle: const TextStyle(
@@ -1303,6 +1311,8 @@ class _MediaMessageBubble extends StatelessWidget {
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
               ),
+            if (!isSticker && message.isForwarded)
+              const ForwardedLabel(),
             _buildMediaContent(
               context,
               message: message,
@@ -1454,6 +1464,8 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                 attachmentType: widget.message.replyToAttachmentType,
                 isOutgoing: widget.message.isOutgoing,
               ),
+            if (widget.message.isForwarded)
+              const ForwardedLabel(),
             GestureDetector(
               onTap: () {
                 if (!_initialized || _error || widget.message.isUploading) return;

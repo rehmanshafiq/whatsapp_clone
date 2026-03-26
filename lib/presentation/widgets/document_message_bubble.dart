@@ -9,6 +9,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/message.dart';
 import 'document_list_item.dart' show formatFileSize;
 import 'message_status_icon.dart';
+import 'forwarded_label.dart';
 
 class DocumentMessageBubble extends StatelessWidget {
   final Message message;
@@ -80,6 +81,8 @@ class DocumentMessageBubble extends StatelessWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              if (message.isForwarded)
+                const ForwardedLabel(),
               Row(
                 children: [
                   Container(
