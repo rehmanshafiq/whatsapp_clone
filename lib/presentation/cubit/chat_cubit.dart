@@ -1405,20 +1405,96 @@ class ChatCubit extends Cubit<ChatState> {
     String audioPath,
     Duration audioDuration,
   ) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendAudioMessage(
-        channelId,
-        audioPath,
-        audioDuration,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_audio';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: '',
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.audio,
+      audioPath: audioPath,
+      audioDuration: audioDuration,
+      localFilePath: audioPath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: audioPath,
+        type: 'audio',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: '',
+          attachmentType: 'voice',
+          attachmentUrl: mediaUrl,
+          audioDuration: audioDuration,
+        );
+      }
+
+      final serverMessage = await _repository.sendRemoteMessage(sent);
+      final finalMessage = serverMessage.copyWith(
+        localFilePath: audioPath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
+      _repository.updateChannelLastMessage(
+        channelId,
+        '\u{1F3A4} Voice message',
+      );
+
+      // Replace optimistic with final message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      } else {
+        // If it got replaced by a socket echo, find it by the body/url or just don't add
+        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
+        if (echoIdx >= 0) {
+          updated[echoIdx] = finalMessage;
+        } else {
+           updated.add(finalMessage);
+        }
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 
@@ -1450,21 +1526,91 @@ class ChatCubit extends Cubit<ChatState> {
     String text = '',
     bool isViewOnce = false,
   }) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendImageMessage(
-        channelId,
-        imagePath,
-        text: text,
-        isViewOnce: isViewOnce,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_image';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: text,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.image,
+      isViewOnce: isViewOnce,
+      localFilePath: imagePath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: imagePath,
+        type: 'image',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'image',
+          attachmentUrl: mediaUrl,
+          isViewOnce: isViewOnce,
+        );
+      }
+
+      final serverMessage = await _repository.sendRemoteMessage(sent);
+      final finalMessage = serverMessage.copyWith(
+        localFilePath: imagePath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
+      _repository.updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
+
+      // Replace optimistic with final message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      } else {
+        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
+        if (echoIdx >= 0) {
+          updated[echoIdx] = finalMessage;
+        } else {
+          updated.add(finalMessage);
+        }
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 
@@ -1537,20 +1683,89 @@ class ChatCubit extends Cubit<ChatState> {
     String videoPath, {
     String text = '',
   }) async {
-    emit(state.copyWith(isSending: true));
-    try {
-      final message = await _repository.sendVideoMessage(
-        channelId,
-        videoPath,
-        text: text,
-      );
-      final updatedMessages = List<Message>.from(state.messages)..add(message);
-      emit(state.copyWith(messages: updatedMessages, isSending: false));
+    final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
 
-      _simulateMessageLifecycle(message);
+    // ── 1. Insert optimistic message with local file preview ──
+    final optimistic = Message(
+      id: clientMsgId,
+      channelId: channelId,
+      senderId: AppConstants.currentUserId,
+      text: text,
+      timestamp: DateTime.now(),
+      status: MessageStatus.sending,
+      type: MessageType.video,
+      localFilePath: videoPath,
+      isUploading: true,
+    );
+    final messagesWithOptimistic = List<Message>.from(state.messages)
+      ..add(optimistic);
+    emit(state.copyWith(messages: messagesWithOptimistic, isSending: true));
+
+    try {
+      // ── 2. Upload media file ──
+      final mediaUrl = await _repository.uploadMedia(
+        filePath: videoPath,
+        type: 'video',
+      );
+
+      // ── 3. Update message with server URL ──
+      final sent = optimistic.copyWith(
+        mediaUrl: mediaUrl,
+        isUploading: false,
+      );
+
+      // Send over WebSocket
+      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
+      if (peerUserId != null) {
+        _repository.sendMessageOverSocket(
+          clientMsgId: clientMsgId,
+          conversationId: channelId,
+          peerUserId: peerUserId,
+          body: text,
+          attachmentType: 'video',
+          attachmentUrl: mediaUrl,
+        );
+      }
+
+      final serverMessage = await _repository.sendRemoteMessage(sent);
+      final finalMessage = serverMessage.copyWith(
+        localFilePath: videoPath,
+        isUploading: false,
+      );
+
+      _repository.persistMessage(finalMessage);
+      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
+      _repository.updateChannelLastMessage(channelId, '\u{1F3A5} Video');
+
+      // Replace optimistic with final message in state
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = finalMessage;
+      } else {
+        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
+        if (echoIdx >= 0) {
+          updated[echoIdx] = finalMessage;
+        } else {
+          updated.add(finalMessage);
+        }
+      }
+      emit(state.copyWith(messages: updated, isSending: false));
+
+      _simulateMessageLifecycle(finalMessage);
       _refreshChannelList();
     } catch (e) {
-      emit(state.copyWith(error: e.toString(), isSending: false));
+      // Mark message as failed (remove uploading state)
+      final updated = List<Message>.from(state.messages);
+      final idx = updated.indexWhere((m) => m.id == clientMsgId);
+      if (idx >= 0) {
+        updated[idx] = updated[idx].copyWith(isUploading: false);
+      }
+      emit(state.copyWith(
+        messages: updated,
+        error: e.toString(),
+        isSending: false,
+      ));
     }
   }
 

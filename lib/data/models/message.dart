@@ -54,6 +54,10 @@ class Message extends Equatable {
   final String? replyToAttachmentType;
   /// True when this message was forwarded.
   final bool isForwarded;
+  /// Local file path for optimistic media preview before upload completes.
+  final String? localFilePath;
+  /// True while media is being uploaded to the server.
+  final bool isUploading;
 
   const Message({
     required this.id,
@@ -92,6 +96,8 @@ class Message extends Equatable {
     this.replyToBody,
     this.replyToAttachmentType,
     this.isForwarded = false,
+    this.localFilePath,
+    this.isUploading = false,
   });
 
   Message copyWith({
@@ -131,6 +137,8 @@ class Message extends Equatable {
     String? replyToBody,
     String? replyToAttachmentType,
     bool? isForwarded,
+    String? localFilePath,
+    bool? isUploading,
   }) {
     return Message(
       id: id ?? this.id,
@@ -171,6 +179,8 @@ class Message extends Equatable {
       replyToAttachmentType:
           replyToAttachmentType ?? this.replyToAttachmentType,
       isForwarded: isForwarded ?? this.isForwarded,
+      localFilePath: localFilePath ?? this.localFilePath,
+      isUploading: isUploading ?? this.isUploading,
     );
   }
 
@@ -211,6 +221,8 @@ class Message extends Equatable {
     'replyToBody': replyToBody,
     'replyToAttachmentType': replyToAttachmentType,
     'isForwarded': isForwarded,
+    'localFilePath': localFilePath,
+    'isUploading': isUploading,
   };
 
   factory Message.fromJson(Map<String, dynamic> json) => Message(
@@ -273,6 +285,8 @@ class Message extends Equatable {
         json['isForwarded'] as bool? ??
         json['is_forwarded'] as bool? ??
         false,
+    localFilePath: json['localFilePath'] as String?,
+    isUploading: json['isUploading'] as bool? ?? false,
   );
 
   bool get isOutgoing => senderId == 'me';
@@ -323,5 +337,7 @@ class Message extends Equatable {
     replyToBody,
     replyToAttachmentType,
     isForwarded,
+    localFilePath,
+    isUploading,
   ];
 }

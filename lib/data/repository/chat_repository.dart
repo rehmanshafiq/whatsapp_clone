@@ -790,6 +790,69 @@ class ChatRepository {
     _persistMessage(message);
   }
 
+  /// Uploads a media file and returns the server URL.
+  /// Used by the cubit for optimistic media sending (upload separately,
+  /// then send the message with the returned URL).
+  Future<String> uploadMedia({
+    required String filePath,
+    required String type,
+  }) async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.uploadMedia(
+      filePath: filePath,
+      token: token,
+      type: type,
+    );
+  }
+
+  /// Public accessor for peer user id so the cubit can send socket messages.
+  String? getPeerUserIdForChannel(String channelId) {
+    return _getPeerUserIdForChannel(channelId);
+  }
+
+  /// Public accessor so the cubit can send messages over WebSocket directly.
+  void sendMessageOverSocket({
+    required String clientMsgId,
+    required String conversationId,
+    required String peerUserId,
+    required String body,
+    String attachmentType = '',
+    String attachmentUrl = '',
+    Duration? audioDuration,
+    bool isViewOnce = false,
+    String replyToMessageId = '',
+    bool isForwarded = false,
+  }) {
+    _sendMessageOverSocket(
+      clientMsgId: clientMsgId,
+      conversationId: conversationId,
+      peerUserId: peerUserId,
+      body: body,
+      attachmentType: attachmentType,
+      attachmentUrl: attachmentUrl,
+      audioDuration: audioDuration,
+      isViewOnce: isViewOnce,
+      replyToMessageId: replyToMessageId,
+      isForwarded: isForwarded,
+    );
+  }
+
+  /// Public wrapper so the cubit can persist messages after optimistic send.
+  void persistMessage(Message message) {
+    _persistMessage(message);
+  }
+
+  /// Public wrapper for sendMessage on the remote data source.
+  Future<Message> sendRemoteMessage(Message message) {
+    return _remoteDataSource.sendMessage(message);
+  }
+
   /// Replaces optimistic message id with server-assigned id (from message_sent_ack).
   void replaceOptimisticMessageId(String clientMsgId, String serverMessageId) {
     final allMessages = _storageService.getMessages();

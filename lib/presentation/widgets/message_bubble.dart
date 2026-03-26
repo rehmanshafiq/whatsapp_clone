@@ -309,7 +309,8 @@ Widget _buildMediaContent(
   }
 
   // Show image (view-once sender not yet opened, or opened recipient within 60s, or normal image)
-  if (message.mediaUrl != null) {
+  final hasMediaOrLocal = message.mediaUrl != null || message.localFilePath != null;
+  if (hasMediaOrLocal) {
     final isOurApiUrl =
         resolvedMediaUrl != null &&
         resolvedMediaUrl.startsWith('http') &&
@@ -318,7 +319,7 @@ Widget _buildMediaContent(
         ? context.read<ChatCubit>().authHeadersForMedia
         : null;
 
-    final imageWidget = ClipRRect(
+    Widget imageWidget = ClipRRect(
       borderRadius: BorderRadius.circular(isSticker ? 0 : 8),
       child: (resolvedMediaUrl != null && resolvedMediaUrl.startsWith('http'))
           ? CachedNetworkImage(
@@ -343,24 +344,39 @@ Widget _buildMediaContent(
               ),
             )
           : Image.file(
-              File(message.mediaUrl!),
+              File(resolvedMediaUrl ?? message.localFilePath!),
               width: isSticker ? stickerSize : null,
               height: isSticker ? stickerSize : null,
               fit: isSticker ? BoxFit.contain : BoxFit.cover,
             ),
     );
 
+    // Overlay for uploading state
+    if (message.isUploading) {
+      imageWidget = Stack(
+        alignment: Alignment.center,
+        children: [
+          imageWidget,
+          const CircularProgressIndicator(
+            valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+            strokeWidth: 3,
+          ),
+        ],
+      );
+    }
+
     if (isSticker || message.isViewOnce) return imageWidget;
 
     return GestureDetector(
       onTap: () {
+        if (message.isUploading) return;
         final isLocal = resolvedMediaUrl == null ||
             !resolvedMediaUrl.startsWith('http');
         Navigator.of(context).push(
           MaterialPageRoute(
             builder: (_) => MediaViewerScreen(
               networkUrl: isLocal ? null : resolvedMediaUrl,
-              localFilePath: isLocal ? message.mediaUrl : null,
+              localFilePath: isLocal ? (message.mediaUrl ?? message.localFilePath) : null,
               httpHeaders: httpHeaders,
             ),
           ),
@@ -1367,7 +1383,8 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
   }
 
   Future<void> _initVideo() async {
-    final url = _resolveMediaUrl(widget.message.mediaUrl);
+    final rawUrl = widget.message.mediaUrl ?? widget.message.localFilePath;
+    final url = _resolveMediaUrl(rawUrl);
     if (url == null) return;
 
     try {
@@ -1439,9 +1456,10 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
               ),
             GestureDetector(
               onTap: () {
-                if (!_initialized || _error) return;
+                if (!_initialized || _error || widget.message.isUploading) return;
                 _controller?.pause();
-                final url = _resolveMediaUrl(widget.message.mediaUrl);
+                final rawUrl = widget.message.mediaUrl ?? widget.message.localFilePath;
+                final url = _resolveMediaUrl(rawUrl);
                 final isLocal = url != null && !url.startsWith('http');
                 Navigator.of(context).push(
                   MaterialPageRoute(
@@ -1469,13 +1487,19 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                             aspectRatio: _controller!.value.aspectRatio,
                             child: VideoPlayer(_controller!),
                           ),
-                          const CircleAvatar(
-                            backgroundColor: Colors.black45,
-                            child: Icon(
-                              Icons.play_arrow,
-                              color: Colors.white,
+                          if (widget.message.isUploading)
+                            const CircularProgressIndicator(
+                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                              strokeWidth: 3,
+                            )
+                          else
+                            const CircleAvatar(
+                              backgroundColor: Colors.black45,
+                              child: Icon(
+                                Icons.play_arrow,
+                                color: Colors.white,
+                              ),
                             ),
-                          ),
                         ],
                       )
                     : Container(

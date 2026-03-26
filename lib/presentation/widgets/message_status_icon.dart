@@ -13,7 +13,11 @@ class MessageStatusIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     switch (status) {
       case MessageStatus.sending:
-        return Icon(Icons.access_time, size: size, color: AppColors.textSecondary);
+        return Icon(
+          Icons.schedule, // WhatsApp-style sending clock
+          size: size,
+          color: AppColors.textSecondary,
+        );
       case MessageStatus.sent:
         return Icon(Icons.done, size: size, color: AppColors.textSecondary);
       case MessageStatus.delivered:
