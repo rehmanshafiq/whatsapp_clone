@@ -1,7 +1,6 @@
 import 'dart:convert';
 import 'dart:async';
 import 'dart:math' as math;
-import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -394,12 +393,14 @@ class MessageBubble extends StatelessWidget {
   final Message message;
   final ReactionsController reactionsController;
   final VoidCallback? onReactionChanged;
+  final VoidCallback? onReplyPreviewTap;
 
   const MessageBubble({
     super.key,
     required this.message,
     required this.reactionsController,
     this.onReactionChanged,
+    this.onReplyPreviewTap,
   });
 
   @override
@@ -408,21 +409,45 @@ class MessageBubble extends StatelessWidget {
     if (message.isAudio) {
       bubble = AudioMessageBubble(message: message);
     } else if (message.isContact) {
-      bubble = _ContactMessageBubble(message: message);
+      bubble = _ContactMessageBubble(
+        message: message,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isLocation) {
-      bubble = _LocationMessageWrapper(message: message);
+      bubble = _LocationMessageWrapper(
+        message: message,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isImage) {
-      bubble = _MediaMessageBubble(message: message, isSticker: false);
+      bubble = _MediaMessageBubble(
+        message: message,
+        isSticker: false,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isVideo) {
-      bubble = _VideoMessageBubble(message: message);
+      bubble = _VideoMessageBubble(
+        message: message,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isGif) {
-      bubble = _MediaMessageBubble(message: message, isSticker: false);
+      bubble = _MediaMessageBubble(
+        message: message,
+        isSticker: false,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isSticker) {
-      bubble = _MediaMessageBubble(message: message, isSticker: true);
+      bubble = _MediaMessageBubble(
+        message: message,
+        isSticker: true,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     } else if (message.isDocument) {
       bubble = DocumentMessageBubble(message: message);
     } else {
-      bubble = _TextMessageBubble(message: message);
+      bubble = _TextMessageBubble(
+        message: message,
+        onReplyPreviewTap: onReplyPreviewTap,
+      );
     }
 
     return ChatMessageWrapper(
@@ -619,8 +644,12 @@ class _SwipeableMessageState extends State<_SwipeableMessage>
 
 class _ContactMessageBubble extends StatelessWidget {
   final Message message;
+  final VoidCallback? onReplyPreviewTap;
 
-  const _ContactMessageBubble({required this.message});
+  const _ContactMessageBubble({
+    required this.message,
+    this.onReplyPreviewTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -671,6 +700,7 @@ class _ContactMessageBubble extends StatelessWidget {
                   previewText: message.replyToBody,
                   attachmentType: message.replyToAttachmentType,
                   isOutgoing: message.isOutgoing,
+                  onTap: onReplyPreviewTap,
                 ),
               if (message.isForwarded)
                 const ForwardedLabel(),
@@ -907,8 +937,12 @@ class _ContactThumb extends StatelessWidget {
 
 class _LocationMessageWrapper extends StatelessWidget {
   final Message message;
+  final VoidCallback? onReplyPreviewTap;
 
-  const _LocationMessageWrapper({required this.message});
+  const _LocationMessageWrapper({
+    required this.message,
+    this.onReplyPreviewTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -951,6 +985,7 @@ class _LocationMessageWrapper extends StatelessWidget {
                   previewText: message.replyToBody,
                   attachmentType: message.replyToAttachmentType,
                   isOutgoing: message.isOutgoing,
+                  onTap: onReplyPreviewTap,
                 ),
               if (message.isForwarded)
                 const ForwardedLabel(),
@@ -1058,12 +1093,14 @@ class _ReplyPreview extends StatelessWidget {
   final String? previewText;
   final String? attachmentType;
   final bool isOutgoing;
+  final VoidCallback? onTap;
 
   const _ReplyPreview({
     required this.senderId,
     required this.previewText,
     required this.attachmentType,
     required this.isOutgoing,
+    this.onTap,
   });
 
   @override
@@ -1105,7 +1142,7 @@ class _ReplyPreview extends StatelessWidget {
       }
     }
 
-    return Container(
+    final preview = Container(
       margin: const EdgeInsets.only(bottom: 4),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
       decoration: BoxDecoration(
@@ -1156,13 +1193,23 @@ class _ReplyPreview extends StatelessWidget {
         ],
       ),
     );
+    if (onTap == null) return preview;
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: onTap,
+      child: preview,
+    );
   }
 }
 
 class _TextMessageBubble extends StatelessWidget {
   final Message message;
+  final VoidCallback? onReplyPreviewTap;
 
-  const _TextMessageBubble({required this.message});
+  const _TextMessageBubble({
+    required this.message,
+    this.onReplyPreviewTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1209,6 +1256,7 @@ class _TextMessageBubble extends StatelessWidget {
                 previewText: message.replyToBody,
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
+                onTap: onReplyPreviewTap,
               ),
             if (message.isForwarded && !isDeletedMessage)
               const ForwardedLabel(),
@@ -1259,8 +1307,13 @@ class _TextMessageBubble extends StatelessWidget {
 class _MediaMessageBubble extends StatelessWidget {
   final Message message;
   final bool isSticker;
+  final VoidCallback? onReplyPreviewTap;
 
-  const _MediaMessageBubble({required this.message, required this.isSticker});
+  const _MediaMessageBubble({
+    required this.message,
+    required this.isSticker,
+    this.onReplyPreviewTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1310,6 +1363,7 @@ class _MediaMessageBubble extends StatelessWidget {
                 previewText: message.replyToBody,
                 attachmentType: message.replyToAttachmentType,
                 isOutgoing: message.isOutgoing,
+                onTap: onReplyPreviewTap,
               ),
             if (!isSticker && message.isForwarded)
               const ForwardedLabel(),
@@ -1374,8 +1428,12 @@ class _MediaMessageBubble extends StatelessWidget {
 
 class _VideoMessageBubble extends StatefulWidget {
   final Message message;
+  final VoidCallback? onReplyPreviewTap;
 
-  const _VideoMessageBubble({required this.message});
+  const _VideoMessageBubble({
+    required this.message,
+    this.onReplyPreviewTap,
+  });
 
   @override
   State<_VideoMessageBubble> createState() => _VideoMessageBubbleState();
@@ -1463,6 +1521,7 @@ class _VideoMessageBubbleState extends State<_VideoMessageBubble> {
                 previewText: widget.message.replyToBody,
                 attachmentType: widget.message.replyToAttachmentType,
                 isOutgoing: widget.message.isOutgoing,
+                onTap: widget.onReplyPreviewTap,
               ),
             if (widget.message.isForwarded)
               const ForwardedLabel(),
