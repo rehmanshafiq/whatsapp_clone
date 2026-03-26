@@ -792,7 +792,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (!ctx.mounted) return;
       ScaffoldMessenger.of(ctx).showSnackBar(
         const SnackBar(
-          content: Text('Conversation deleted'),
+          content: Text('Conversation deleted', style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w500,
+          ),),
           backgroundColor: AppColors.appBar,
           duration: Duration(seconds: 2),
         ),
