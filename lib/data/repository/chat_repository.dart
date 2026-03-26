@@ -121,6 +121,16 @@ class ChatRepository {
     }
   }
 
+  /// Fetches messages from local storage instantly for immediate UI display.
+  List<Message> getLocalMessages(String channelId) {
+    try {
+      final fromStorage = _storageService.getMessagesForChannel(channelId);
+      return _normalizeMessageSenderIds(fromStorage);
+    } catch (_) {
+      return [];
+    }
+  }
+
   /// Fetches the latest [limit] messages for [channelId]. Used for initial chat load.
   Future<MessagesPage> getMessages(
     String channelId, {

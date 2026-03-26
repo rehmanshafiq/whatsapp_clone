@@ -138,16 +138,32 @@ class ChatCubit extends Cubit<ChatState> {
   }
 
   Future<void> loadMessages(String channelId) async {
+    final channel = _repository.getChannel(channelId);
+    final localMessages = _repository.getLocalMessages(channelId);
+    localMessages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    final channelFromState =
+        state.channels.where((c) => c.id == channelId).firstOrNull;
+    final effectiveIsOnline =
+        channelFromState?.isOnline ??
+        (state.selectedChannel?.id == channelId ? state.isOnline : null) ??
+        channel?.isOnline ??
+        false;
+
     emit(
       state.copyWith(
+        messages: localMessages,
+        selectedChannel: channel,
+        isOnline: effectiveIsOnline,
         isLoading: true,
+        hasLoadedMessages: localMessages.isNotEmpty,
         clearError: true,
         isTyping: false,
         isRecordingAudio: false,
       ),
     );
+
     try {
-      final channel = _repository.getChannel(channelId);
       final page = await _repository.getMessages(channelId);
       final messages = page.messages; // Already normalized by repository
       messages.sort((a, b) => a.timestamp.compareTo(b.timestamp));
@@ -1438,7 +1454,8 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
       final peerUserId = _repository.getPeerUserIdForChannel(channelId);
       if (peerUserId != null) {
         _repository.sendMessageOverSocket(
@@ -1452,32 +1469,22 @@ class ChatCubit extends Cubit<ChatState> {
         );
       }
 
-      final serverMessage = await _repository.sendRemoteMessage(sent);
-      final finalMessage = serverMessage.copyWith(
+      final finalMessage = sent.copyWith(
         localFilePath: audioPath,
         isUploading: false,
       );
 
       _repository.persistMessage(finalMessage);
-      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
       _repository.updateChannelLastMessage(
         channelId,
         '\u{1F3A4} Voice message',
       );
 
-      // Replace optimistic with final message in state
+      // Replace optimistic with uploaded message in state
       final updated = List<Message>.from(state.messages);
       final idx = updated.indexWhere((m) => m.id == clientMsgId);
       if (idx >= 0) {
         updated[idx] = finalMessage;
-      } else {
-        // If it got replaced by a socket echo, find it by the body/url or just don't add
-        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
-        if (echoIdx >= 0) {
-          updated[echoIdx] = finalMessage;
-        } else {
-           updated.add(finalMessage);
-        }
       }
       emit(state.copyWith(messages: updated, isSending: false));
 
@@ -1558,7 +1565,8 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
       final peerUserId = _repository.getPeerUserIdForChannel(channelId);
       if (peerUserId != null) {
         _repository.sendMessageOverSocket(
@@ -1572,28 +1580,19 @@ class ChatCubit extends Cubit<ChatState> {
         );
       }
 
-      final serverMessage = await _repository.sendRemoteMessage(sent);
-      final finalMessage = serverMessage.copyWith(
+      final finalMessage = sent.copyWith(
         localFilePath: imagePath,
         isUploading: false,
       );
 
       _repository.persistMessage(finalMessage);
-      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
       _repository.updateChannelLastMessage(channelId, '\u{1F4F7} Photo');
 
-      // Replace optimistic with final message in state
+      // Replace optimistic with uploaded message in state
       final updated = List<Message>.from(state.messages);
       final idx = updated.indexWhere((m) => m.id == clientMsgId);
       if (idx >= 0) {
         updated[idx] = finalMessage;
-      } else {
-        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
-        if (echoIdx >= 0) {
-          updated[echoIdx] = finalMessage;
-        } else {
-          updated.add(finalMessage);
-        }
       }
       emit(state.copyWith(messages: updated, isSending: false));
 
@@ -1714,7 +1713,8 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket
+      // Send over WebSocket (backend creates the message; message_sent_ack
+      // will replace clientMsgId with the server-assigned id).
       final peerUserId = _repository.getPeerUserIdForChannel(channelId);
       if (peerUserId != null) {
         _repository.sendMessageOverSocket(
@@ -1727,28 +1727,19 @@ class ChatCubit extends Cubit<ChatState> {
         );
       }
 
-      final serverMessage = await _repository.sendRemoteMessage(sent);
-      final finalMessage = serverMessage.copyWith(
+      final finalMessage = sent.copyWith(
         localFilePath: videoPath,
         isUploading: false,
       );
 
       _repository.persistMessage(finalMessage);
-      _repository.replaceOptimisticMessageId(clientMsgId, finalMessage.id);
       _repository.updateChannelLastMessage(channelId, '\u{1F3A5} Video');
 
-      // Replace optimistic with final message in state
+      // Replace optimistic with uploaded message in state
       final updated = List<Message>.from(state.messages);
       final idx = updated.indexWhere((m) => m.id == clientMsgId);
       if (idx >= 0) {
         updated[idx] = finalMessage;
-      } else {
-        final echoIdx = updated.indexWhere((m) => m.id == finalMessage.id);
-        if (echoIdx >= 0) {
-          updated[echoIdx] = finalMessage;
-        } else {
-          updated.add(finalMessage);
-        }
       }
       emit(state.copyWith(messages: updated, isSending: false));
 
