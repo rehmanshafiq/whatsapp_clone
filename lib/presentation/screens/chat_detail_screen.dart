@@ -362,6 +362,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
           prev.messages != curr.messages ||
           prev.selectedChannel != curr.selectedChannel ||
           prev.isLoading != curr.isLoading ||
+          prev.hasLoadedMessages != curr.hasLoadedMessages ||
           prev.isPaginationLoading != curr.isPaginationLoading ||
           prev.isTyping != curr.isTyping ||
           prev.isRecordingAudio != curr.isRecordingAudio ||
@@ -544,7 +545,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 Column(
                   children: [
                     Expanded(
-                      child: state.isLoading && hasNoMessages
+                      child: !state.hasLoadedMessages && hasNoMessages
                           ? const Center(
                               child: CircularProgressIndicator(
                                 color: AppColors.accent,

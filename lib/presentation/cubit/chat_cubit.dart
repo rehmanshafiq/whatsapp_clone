@@ -217,6 +217,7 @@ class ChatCubit extends Cubit<ChatState> {
             selectedChannel: effectiveChannel,
             isOnline: effectiveIsOnline,
             isLoading: false,
+            hasLoadedMessages: true,
             hasMoreMessages: page.hasMore,
             channels: updatedChats,
           ),
@@ -226,6 +227,7 @@ class ChatCubit extends Cubit<ChatState> {
           state.copyWith(
             messages: messages,
             isLoading: false,
+            hasLoadedMessages: true,
             hasMoreMessages: page.hasMore,
           ),
         );
