@@ -1,11 +1,20 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:audioplayers/audioplayers.dart';
+import 'package:audioplayers/audioplayers.dart' as ap;
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
+import 'package:just_audio/just_audio.dart' as ja;
 
 class AudioPlaybackService {
-  AudioPlayer _player = AudioPlayer();
+  static const MethodChannel _justAudioChannel = MethodChannel(
+    'com.ryanheise.just_audio.methods',
+  );
+
+  ja.AudioPlayer? _justPlayer;
+  ap.AudioPlayer? _legacyPlayer;
+  bool _useLegacyBackend = false;
+  Future<void>? _backendInitFuture;
   String? _currentlyPlayingId;
 
   final _playingIdController = StreamController<String?>.broadcast();
@@ -19,70 +28,201 @@ class AudioPlaybackService {
   Stream<void> get completionStream => _completionController.stream;
 
   String? get currentlyPlayingId => _currentlyPlayingId;
-
-  StreamSubscription<Duration>? _positionSub;
-  StreamSubscription<Duration>? _durationSub;
-  StreamSubscription<PlayerState>? _stateSub;
-  StreamSubscription<String>? _errorSub;
-
-  AudioPlaybackService() {
-    _attachListeners();
+  bool get isPlaying {
+    if (_useLegacyBackend) {
+      return _legacyPlayer?.state == ap.PlayerState.playing;
+    }
+    return _justPlayer?.playing ?? false;
   }
 
-  void _attachListeners() {
-    _positionSub = _player.onPositionChanged.listen((pos) {
+  StreamSubscription<Duration>? _positionSub;
+  StreamSubscription<Duration?>? _justDurationSub;
+  StreamSubscription<ja.PlayerState>? _justStateSub;
+  StreamSubscription<Duration>? _legacyDurationSub;
+  StreamSubscription<ap.PlayerState>? _legacyStateSub;
+  StreamSubscription<String>? _legacyLogSub;
+
+  AudioPlaybackService();
+
+  Future<void> _ensureBackend() {
+    final existing = _backendInitFuture;
+    if (existing != null) return existing;
+    final next = _initializeBackend();
+    _backendInitFuture = next;
+    return next;
+  }
+
+  Future<void> _initializeBackend() async {
+    final justAudioAvailable = await _isJustAudioPluginAvailable();
+    if (justAudioAvailable) {
+      try {
+        _justPlayer = ja.AudioPlayer();
+        _useLegacyBackend = false;
+        _attachJustAudioListeners();
+        debugPrint('AudioPlayback: using just_audio backend');
+        return;
+      } catch (e) {
+        debugPrint(
+          'AudioPlayback: just_audio init failed, using audioplayers fallback: $e',
+        );
+      }
+    }
+
+    _legacyPlayer = ap.AudioPlayer();
+    _useLegacyBackend = true;
+    _attachLegacyAudioListeners();
+    debugPrint('AudioPlayback: using audioplayers fallback backend');
+  }
+
+  Future<bool> _isJustAudioPluginAvailable() async {
+    try {
+      await _justAudioChannel.invokeMethod<void>('disposeAllPlayers');
+      return true;
+    } on MissingPluginException {
+      debugPrint(
+        'AudioPlayback: just_audio plugin unavailable, using audioplayers fallback.',
+      );
+      return false;
+    } catch (_) {
+      // Method channel exists but may return a platform error; plugin is present.
+      return true;
+    }
+  }
+
+  void _attachJustAudioListeners() {
+    final player = _justPlayer;
+    if (player == null) return;
+
+    _positionSub = player.positionStream.listen((pos) {
       _positionController.add(pos);
     });
-    _durationSub = _player.onDurationChanged.listen((dur) {
-      _durationController.add(dur);
+
+    _justDurationSub = player.durationStream.listen((dur) {
+      if (dur != null && dur > Duration.zero) {
+        _durationController.add(dur);
+      }
     });
-    _stateSub = _player.onPlayerStateChanged.listen((state) {
-      if (state == PlayerState.completed) {
+
+    _justStateSub = player.playerStateStream.listen(
+      (state) {
+        if (state.processingState == ja.ProcessingState.completed) {
+          _completionController.add(null);
+          _currentlyPlayingId = null;
+          _playingIdController.add(null);
+          _safeCall(() => player.setSpeed(1.0));
+          return;
+        }
+
+        if (_currentlyPlayingId != null &&
+            state.processingState != ja.ProcessingState.idle) {
+          _playingIdController.add(_currentlyPlayingId);
+        }
+      },
+      onError: (Object e, StackTrace st) {
+        debugPrint('AudioPlayback: just_audio state error: $e');
+      },
+    );
+  }
+
+  void _attachLegacyAudioListeners() {
+    final player = _legacyPlayer;
+    if (player == null) return;
+
+    _positionSub = player.onPositionChanged.listen((pos) {
+      _positionController.add(pos);
+    });
+
+    _legacyDurationSub = player.onDurationChanged.listen((dur) {
+      if (dur > Duration.zero) {
+        _durationController.add(dur);
+      }
+    });
+
+    _legacyStateSub = player.onPlayerStateChanged.listen((state) {
+      if (state == ap.PlayerState.completed) {
         _completionController.add(null);
         _currentlyPlayingId = null;
         _playingIdController.add(null);
-        _safeCall(() => _player.setPlaybackRate(1.0));
+        _safeCall(() => player.setPlaybackRate(1.0));
       } else if (_currentlyPlayingId != null &&
-          (state == PlayerState.playing || state == PlayerState.paused)) {
+          (state == ap.PlayerState.playing || state == ap.PlayerState.paused)) {
         _playingIdController.add(_currentlyPlayingId);
       }
     });
-    _errorSub = _player.onLog.listen((msg) {
-      debugPrint('AudioPlayer log: $msg');
+
+    _legacyLogSub = player.onLog.listen((msg) {
+      debugPrint('AudioPlayback fallback log: $msg');
     });
   }
 
   void _detachListeners() {
     _positionSub?.cancel();
-    _durationSub?.cancel();
-    _stateSub?.cancel();
-    _errorSub?.cancel();
+    _positionSub = null;
+
+    _justDurationSub?.cancel();
+    _justDurationSub = null;
+
+    _justStateSub?.cancel();
+    _justStateSub = null;
+
+    _legacyDurationSub?.cancel();
+    _legacyDurationSub = null;
+
+    _legacyStateSub?.cancel();
+    _legacyStateSub = null;
+
+    _legacyLogSub?.cancel();
+    _legacyLogSub = null;
   }
 
-  /// Recreate the player to clear any stuck error state.
-  Future<void> _resetPlayer() async {
+  Future<void> _switchToLegacyBackend() async {
     _detachListeners();
-    try {
-      await _player.dispose();
-    } catch (_) {}
-    _player = AudioPlayer();
-    _attachListeners();
+
+    final justPlayer = _justPlayer;
+    _justPlayer = null;
+    if (justPlayer != null) {
+      try {
+        await justPlayer.dispose();
+      } catch (_) {}
+    }
+
+    _legacyPlayer ??= ap.AudioPlayer();
+    _useLegacyBackend = true;
+    _attachLegacyAudioListeners();
   }
 
-  Future<void> play(String messageId, String pathOrUrl) async {
-    if (_currentlyPlayingId == messageId) {
-      final state = _player.state;
-      if (state == PlayerState.playing) {
-        await _safeCall(() => _player.pause());
-        _playingIdController.add(messageId);
-        return;
-      }
-      if (state == PlayerState.paused) {
-        await _safeCall(() => _player.resume());
-        _playingIdController.add(messageId);
-        return;
-      }
+  Future<void> _resetJustAudioPlayer() async {
+    _detachListeners();
+    final player = _justPlayer;
+    _justPlayer = null;
+    if (player != null) {
+      try {
+        await player.dispose();
+      } catch (_) {}
     }
+    _justPlayer = ja.AudioPlayer();
+    _attachJustAudioListeners();
+  }
+
+  Future<void> _resetLegacyAudioPlayer() async {
+    _detachListeners();
+    final player = _legacyPlayer;
+    _legacyPlayer = null;
+    if (player != null) {
+      try {
+        await player.dispose();
+      } catch (_) {}
+    }
+    _legacyPlayer = ap.AudioPlayer();
+    _attachLegacyAudioListeners();
+  }
+
+  Future<void> play(
+    String messageId,
+    String pathOrUrl, {
+    Map<String, String>? headers,
+  }) async {
+    await _ensureBackend();
 
     final isUrl = pathOrUrl.startsWith('http');
     if (!isUrl) {
@@ -97,51 +237,205 @@ class AudioPlaybackService {
       }
     }
 
-    await _safeCall(() => _player.stop());
+    if (_useLegacyBackend) {
+      await _playWithLegacy(
+        messageId: messageId,
+        pathOrUrl: pathOrUrl,
+        isUrl: isUrl,
+        headers: headers,
+      );
+      return;
+    }
+
+    await _playWithJustAudio(
+      messageId: messageId,
+      pathOrUrl: pathOrUrl,
+      isUrl: isUrl,
+      headers: headers,
+    );
+  }
+
+  Future<void> _playWithJustAudio({
+    required String messageId,
+    required String pathOrUrl,
+    required bool isUrl,
+    Map<String, String>? headers,
+  }) async {
+    final player = _justPlayer;
+    if (player == null) return;
+
+    if (_currentlyPlayingId == messageId) {
+      if (player.playing) {
+        await _safeCall(() => player.pause());
+        _playingIdController.add(messageId);
+        return;
+      }
+      if (player.processingState == ja.ProcessingState.completed) {
+        await _safeCall(() => player.seek(Duration.zero));
+        _playingIdController.add(messageId);
+        _startJustPlayback(player);
+        return;
+      }
+      if (player.processingState == ja.ProcessingState.ready ||
+          player.processingState == ja.ProcessingState.buffering) {
+        _playingIdController.add(messageId);
+        _startJustPlayback(player);
+        return;
+      }
+    }
+
+    if (_currentlyPlayingId != null && _currentlyPlayingId != messageId) {
+      _currentlyPlayingId = null;
+      _playingIdController.add(null);
+    }
+
+    await _safeCall(() => player.stop());
     _currentlyPlayingId = messageId;
-    // Ensure UI starts each new track from the beginning and does not reuse
-    // stale position from a previously played message.
     _positionController.add(Duration.zero);
     _playingIdController.add(messageId);
 
     try {
       if (isUrl) {
-        await _player.play(UrlSource(pathOrUrl));
+        await player.setUrl(pathOrUrl, headers: headers);
       } else {
-        await _player.play(DeviceFileSource(pathOrUrl));
+        await player.setFilePath(pathOrUrl);
       }
+      final duration = player.duration;
+      if (duration != null && duration > Duration.zero) {
+        _durationController.add(duration);
+      }
+      _startJustPlayback(player);
     } catch (e) {
-      debugPrint('AudioPlayback: play failed, resetting player: $e');
+      if (e is MissingPluginException) {
+        debugPrint(
+          'AudioPlayback: just_audio plugin missing at runtime. Switching fallback.',
+        );
+        await _switchToLegacyBackend();
+        await _playWithLegacy(
+          messageId: messageId,
+          pathOrUrl: pathOrUrl,
+          isUrl: isUrl,
+          headers: headers,
+        );
+        return;
+      }
+      await _handleJustAudioPlaybackFailure(e);
+    }
+  }
+
+  Future<void> _playWithLegacy({
+    required String messageId,
+    required String pathOrUrl,
+    required bool isUrl,
+    Map<String, String>? headers,
+  }) async {
+    final player = _legacyPlayer;
+    if (player == null) return;
+
+    if (_currentlyPlayingId == messageId) {
+      final state = player.state;
+      if (state == ap.PlayerState.playing) {
+        await _safeCall(() => player.pause());
+        _playingIdController.add(messageId);
+        return;
+      }
+      if (state == ap.PlayerState.paused) {
+        await _safeCall(() => player.resume());
+        _playingIdController.add(messageId);
+        return;
+      }
+    }
+
+    if (_currentlyPlayingId != null && _currentlyPlayingId != messageId) {
       _currentlyPlayingId = null;
       _playingIdController.add(null);
-      await _resetPlayer();
+    }
+
+    await _safeCall(() => player.stop());
+    _currentlyPlayingId = messageId;
+    _positionController.add(Duration.zero);
+    _playingIdController.add(messageId);
+
+    try {
+      if (isUrl) {
+        await player.play(ap.UrlSource(pathOrUrl));
+      } else {
+        await player.play(ap.DeviceFileSource(pathOrUrl));
+      }
+    } catch (e) {
+      await _handleLegacyPlaybackFailure(e);
     }
   }
 
   Future<void> stop() async {
-    await _safeCall(() => _player.stop());
-    _positionController.add(Duration.zero);
+    await _ensureBackend();
     _currentlyPlayingId = null;
     _playingIdController.add(null);
-  }
+    _positionController.add(Duration.zero);
 
-  Future<void> seek(Duration position) async {
-    await _safeCall(() => _player.seek(position));
-  }
+    if (_useLegacyBackend) {
+      final player = _legacyPlayer;
+      if (player != null) {
+        await _safeCall(() => player.stop());
+      }
+      return;
+    }
 
-  Future<void> setPlaybackRate(double rate) async {
-    await _safeCall(() => _player.setPlaybackRate(rate));
-  }
-
-  Future<Duration?> getDuration() async {
-    try {
-      return await _player.getDuration();
-    } catch (_) {
-      return null;
+    final player = _justPlayer;
+    if (player != null) {
+      await _safeCall(() => player.stop());
     }
   }
 
-  PlayerState get state => _player.state;
+  Future<void> seek(Duration position) async {
+    await _ensureBackend();
+
+    if (_useLegacyBackend) {
+      final player = _legacyPlayer;
+      if (player != null) {
+        await _safeCall(() => player.seek(position));
+      }
+      return;
+    }
+
+    final player = _justPlayer;
+    if (player != null) {
+      await _safeCall(() => player.seek(position));
+    }
+  }
+
+  Future<void> setPlaybackRate(double rate) async {
+    await _ensureBackend();
+
+    if (_useLegacyBackend) {
+      final player = _legacyPlayer;
+      if (player != null) {
+        await _safeCall(() => player.setPlaybackRate(rate));
+      }
+      return;
+    }
+
+    final player = _justPlayer;
+    if (player != null) {
+      await _safeCall(() => player.setSpeed(rate));
+    }
+  }
+
+  Future<Duration?> getDuration() async {
+    await _ensureBackend();
+
+    if (_useLegacyBackend) {
+      final player = _legacyPlayer;
+      if (player == null) return null;
+      try {
+        return await player.getDuration();
+      } catch (_) {
+        return null;
+      }
+    }
+
+    return _justPlayer?.duration;
+  }
 
   Future<void> _safeCall(Future<void> Function() fn) async {
     try {
@@ -149,9 +443,51 @@ class AudioPlaybackService {
     } catch (_) {}
   }
 
+  void _startJustPlayback(ja.AudioPlayer player) {
+    unawaited(
+      player.play().catchError((Object e, StackTrace st) {
+        debugPrint('AudioPlayback: just_audio play() future error: $e');
+      }),
+    );
+  }
+
+  Future<void> _handleJustAudioPlaybackFailure(Object error) async {
+    debugPrint('AudioPlayback: just_audio play failed, resetting player: $error');
+    _currentlyPlayingId = null;
+    _playingIdController.add(null);
+
+    if (_useLegacyBackend) return;
+    try {
+      await _resetJustAudioPlayer();
+    } catch (_) {}
+  }
+
+  Future<void> _handleLegacyPlaybackFailure(Object error) async {
+    debugPrint('AudioPlayback: audioplayers fallback play failed: $error');
+    _currentlyPlayingId = null;
+    _playingIdController.add(null);
+
+    if (!_useLegacyBackend) return;
+    try {
+      await _resetLegacyAudioPlayer();
+    } catch (_) {}
+  }
+
   void dispose() {
     _detachListeners();
-    _player.dispose();
+
+    final justPlayer = _justPlayer;
+    if (justPlayer != null) {
+      unawaited(justPlayer.dispose());
+      _justPlayer = null;
+    }
+
+    final legacyPlayer = _legacyPlayer;
+    if (legacyPlayer != null) {
+      unawaited(legacyPlayer.dispose());
+      _legacyPlayer = null;
+    }
+
     _playingIdController.close();
     _positionController.close();
     _durationController.close();

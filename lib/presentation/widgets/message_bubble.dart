@@ -409,7 +409,10 @@ class MessageBubble extends StatelessWidget {
   Widget build(BuildContext context) {
     Widget bubble;
     if (message.isAudio) {
-      bubble = AudioMessageBubble(message: message);
+      bubble = AudioMessageBubble(
+        message: message,
+        authHeaders: context.read<ChatCubit>().authHeadersForMedia,
+      );
     } else if (message.isContact) {
       bubble = _ContactMessageBubble(
         message: message,
