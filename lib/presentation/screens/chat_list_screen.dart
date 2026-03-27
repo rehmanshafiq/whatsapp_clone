@@ -650,7 +650,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final newState = channel.isMuted ? 'unmuted' : 'muted';
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
-          content: Text('Chat $newState'),
+          content: Text('Chat $newState', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),),
           backgroundColor: AppColors.appBar,
           duration: const Duration(seconds: 2),
         ),
