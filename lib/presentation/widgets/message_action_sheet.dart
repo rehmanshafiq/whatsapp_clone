@@ -7,10 +7,12 @@ import '../cubit/chat_cubit.dart';
 
 class MessageActionSheet extends StatelessWidget {
   final Message message;
+  final BuildContext parentContext;
 
   const MessageActionSheet({
     super.key,
     required this.message,
+    required this.parentContext,
   });
 
   static Future<void> show(BuildContext context, Message message) {
@@ -26,7 +28,10 @@ class MessageActionSheet extends StatelessWidget {
       ),
       builder: (_) => BlocProvider.value(
         value: cubit,
-        child: MessageActionSheet(message: message),
+        child: MessageActionSheet(
+          message: message,
+          parentContext: context,
+        ),
       ),
     );
   }
@@ -70,7 +75,7 @@ class MessageActionSheet extends StatelessWidget {
                     icon: Icons.reply,
                     label: 'Reply',
                     onTap: () {
-                      final cubit = context.read<ChatCubit>();
+                      final cubit = parentContext.read<ChatCubit>();
                       cubit.startReplyTo(message);
                       Navigator.pop(context);
                     },
@@ -79,21 +84,23 @@ class MessageActionSheet extends StatelessWidget {
                     icon: Icons.forward,
                     label: 'Forward',
                     onTap: () {
-                      Navigator.pop(context);
-                      _handleForward(context);
+                      Navigator.of(context).maybePop().then((_) {
+                        if (!parentContext.mounted) return;
+                        _handleForward(parentContext);
+                      });
                     },
                   ),
                   _ActionButton(
                     icon: Icons.copy,
                     label: 'Copy',
                     onTap: () async {
+                      final cubit = parentContext.read<ChatCubit>();
+                      final messenger = ScaffoldMessenger.maybeOf(parentContext);
                       Navigator.pop(context);
-                      await context.read<ChatCubit>().copyMessageToClipboard(message);
-                      if (context.mounted) {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Message copied')),
-                        );
-                      }
+                      await cubit.copyMessageToClipboard(message);
+                      messenger?.showSnackBar(
+                        const SnackBar(content: Text('Message copied')),
+                      );
                     },
                   ),
                   _ActionButton(
@@ -101,8 +108,10 @@ class MessageActionSheet extends StatelessWidget {
                     label: 'Delete',
                     color: Colors.redAccent,
                     onTap: () {
-                      Navigator.pop(context);
-                      _showDeleteConfirmation(context);
+                      Navigator.of(context).maybePop().then((_) {
+                        if (!parentContext.mounted) return;
+                        _showDeleteConfirmation(parentContext);
+                      });
                     },
                   ),
                 ],
@@ -258,8 +267,13 @@ class MessageActionSheet extends StatelessWidget {
         .where((c) => c.id != message.channelId)
         .toList()
       ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
-      
-    if (channels.isEmpty) return;
+
+    if (channels.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('No other chats available to forward')),
+      );
+      return;
+    }
 
     final selected = <String>{};
     final channelIds = await showModalBottomSheet<List<String>>(
@@ -313,7 +327,7 @@ class MessageActionSheet extends StatelessWidget {
                     Expanded(
                       child: ListView.separated(
                         itemCount: channels.length,
-                        separatorBuilder: (_, __) => Divider(
+                        separatorBuilder: (_, _) => Divider(
                           color: AppColors.divider.withValues(alpha: 0.5),
                           height: 1,
                           indent: 76,

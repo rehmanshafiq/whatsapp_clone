@@ -36,15 +36,23 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   /// "Scroll-to-bottom" FAB is hidden while the user is within this many
   /// pixels of the visual bottom (latest messages).
   static const double _atBottomThreshold = 80.0;
+  static const double _messageJumpExtentEstimate = 96.0;
+  static const int _maxPaginationAttemptsForReplyJump = 20;
+  static const int _maxScrollAttemptsForReplyJump = 8;
+  static const int _replyJumpFlashCycles = 2;
 
   // ------------------------------------------------------------------
   // State
   // ------------------------------------------------------------------
 
   final _scrollController = ScrollController();
+  final Map<String, GlobalKey> _messageKeysById = <String, GlobalKey>{};
   late final ReactionsController _reactionsController;
   bool _reactionsSynced = false;
   bool _showScrollToBottom = false;
+  String? _flashingMessageId;
+  bool _showFlashingOverlay = false;
+  int _flashSequence = 0;
 
   /// The maxScrollExtent captured **once** at the start of each pagination
   /// request.  Nulled out after the post-frame delta jump is applied.
@@ -129,6 +137,131 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     } else {
       _scrollController.jumpTo(0);
     }
+  }
+
+  Future<void> _onReplyPreviewTapped(String? targetMessageId) async {
+    final messageId = targetMessageId?.trim() ?? '';
+    if (messageId.isEmpty) return;
+
+    final targetExists = await _ensureTargetMessageIsLoaded(messageId);
+    if (!mounted) return;
+
+    if (!targetExists) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Original message is not available.')),
+      );
+      return;
+    }
+
+    final scrolled = await _scrollToMessageById(messageId);
+    if (!mounted || !scrolled) return;
+    await _flashJumpTargetMessage(messageId);
+  }
+
+  Future<bool> _ensureTargetMessageIsLoaded(String messageId) async {
+    final cubit = context.read<ChatCubit>();
+
+    for (var i = 0; i < _maxPaginationAttemptsForReplyJump; i++) {
+      final currentState = cubit.state;
+      final existsInState = currentState.messages.any(
+        (m) => m.channelId == widget.channelId && m.id == messageId,
+      );
+      if (existsInState) return true;
+
+      if (!currentState.hasMoreMessages) return false;
+
+      if (currentState.isPaginationLoading) {
+        try {
+          await cubit.stream.firstWhere((s) => !s.isPaginationLoading);
+        } catch (_) {
+          return false;
+        }
+        continue;
+      }
+
+      await cubit.loadOlderMessages(widget.channelId);
+    }
+
+    final finalState = cubit.state;
+    return finalState.messages.any(
+      (m) => m.channelId == widget.channelId && m.id == messageId,
+    );
+  }
+
+  Future<bool> _scrollToMessageById(String messageId) async {
+    for (var i = 0; i < _maxScrollAttemptsForReplyJump; i++) {
+      if (!mounted || !_scrollController.hasClients) return false;
+
+      final targetKey = _messageKeysById[messageId];
+      final targetContext = targetKey?.currentContext;
+      if (targetContext != null) {
+        if (!targetContext.mounted) continue;
+        await Scrollable.ensureVisible(
+          targetContext,
+          alignment: 0.18,
+          duration: const Duration(milliseconds: 260),
+          curve: Curves.easeOutCubic,
+        );
+        return true;
+      }
+
+      final estimatedOffset = _estimateOffsetForMessage(messageId);
+      if (estimatedOffset != null) {
+        _scrollController.jumpTo(estimatedOffset);
+      }
+
+      await Future<void>.delayed(const Duration(milliseconds: 16));
+    }
+    return false;
+  }
+
+  double? _estimateOffsetForMessage(String messageId) {
+    if (!_scrollController.hasClients) return null;
+
+    final state = context.read<ChatCubit>().state;
+    final messagesForChat = state.messages
+        .where((m) => m.channelId == widget.channelId)
+        .toList()
+      ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+
+    final ascendingIndex = messagesForChat.indexWhere((m) => m.id == messageId);
+    if (ascendingIndex == -1) return null;
+
+    var listIndexFromBottom = (messagesForChat.length - 1) - ascendingIndex;
+    if (state.isTyping) {
+      listIndexFromBottom += 1;
+    }
+
+    final estimate = listIndexFromBottom * _messageJumpExtentEstimate;
+    final clamped = estimate.clamp(0.0, _scrollController.position.maxScrollExtent);
+    return clamped.toDouble();
+  }
+
+  Future<void> _flashJumpTargetMessage(String messageId) async {
+    final sequence = ++_flashSequence;
+    if (!mounted) return;
+
+    setState(() {
+      _flashingMessageId = messageId;
+      _showFlashingOverlay = true;
+    });
+
+    for (var i = 0; i < _replyJumpFlashCycles; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 140));
+      if (!mounted || sequence != _flashSequence) return;
+      setState(() => _showFlashingOverlay = false);
+
+      await Future<void>.delayed(const Duration(milliseconds: 110));
+      if (!mounted || sequence != _flashSequence) return;
+      setState(() => _showFlashingOverlay = true);
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+    if (!mounted || sequence != _flashSequence) return;
+    setState(() {
+      _showFlashingOverlay = false;
+      _flashingMessageId = null;
+    });
   }
 
   /// Called after older messages finish loading.
@@ -427,6 +560,8 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
             .where((m) => m.channelId == widget.channelId)
             .toList()
           ..sort((a, b) => a.timestamp.compareTo(b.timestamp));
+        final messageIds = messagesForThisChat.map((m) => m.id).toSet();
+        _messageKeysById.removeWhere((id, _) => !messageIds.contains(id));
 
         // reversed so index 0 == latest message (sits at visual bottom
         // because ListView has reverse:true).
@@ -606,6 +741,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                 // ── Message bubble ────────────────────────────
                                 final messageIndex = index - typingOffset;
                                 final message = reversedMessages[messageIndex];
+                                final messageKey = _messageKeysById.putIfAbsent(
+                                  message.id,
+                                  () => GlobalKey(),
+                                );
                                 final currentDay = _toLocalDateOnly(
                                   message.timestamp,
                                 );
@@ -620,47 +759,63 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                     nextDay == null ||
                                     !_isSameDay(currentDay, nextDay);
 
-                                return Column(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    if (shouldShowDateHeader)
-                                      Padding(
-                                        padding: const EdgeInsets.symmetric(
-                                          vertical: 8,
-                                        ),
-                                        child: Center(
-                                          child: Container(
-                                            padding: const EdgeInsets.symmetric(
-                                              horizontal: 10,
-                                              vertical: 4,
-                                            ),
-                                            decoration: BoxDecoration(
-                                              color: AppColors.appBar.withValues(
-                                                alpha: 0.85,
+                                return KeyedSubtree(
+                                  key: messageKey,
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (shouldShowDateHeader)
+                                        Padding(
+                                          padding: const EdgeInsets.symmetric(
+                                            vertical: 8,
+                                          ),
+                                          child: Center(
+                                            child: Container(
+                                              padding:
+                                                  const EdgeInsets.symmetric(
+                                                    horizontal: 10,
+                                                    vertical: 4,
+                                                  ),
+                                              decoration: BoxDecoration(
+                                                color: AppColors.appBar
+                                                    .withValues(alpha: 0.85),
+                                                borderRadius:
+                                                    BorderRadius.circular(10),
                                               ),
-                                              borderRadius:
-                                                  BorderRadius.circular(10),
-                                            ),
-                                            child: Text(
-                                              _formatMessageDateLabel(
-                                                message.timestamp,
-                                              ),
-                                              style: const TextStyle(
-                                                color: AppColors.textSecondary,
-                                                fontSize: 12,
-                                                fontWeight: FontWeight.w500,
+                                              child: Text(
+                                                _formatMessageDateLabel(
+                                                  message.timestamp,
+                                                ),
+                                                style: const TextStyle(
+                                                  color: AppColors.textSecondary,
+                                                  fontSize: 12,
+                                                  fontWeight: FontWeight.w500,
+                                                ),
                                               ),
                                             ),
                                           ),
                                         ),
+                                      MessageBubble(
+                                        key: ValueKey(message.id),
+                                        message: message,
+                                        reactionsController:
+                                            _reactionsController,
+                                        onReactionChanged: () => setState(() {}),
+                                        isFlashHighlighted:
+                                            _flashingMessageId == message.id &&
+                                            _showFlashingOverlay,
+                                        onReplyPreviewTap:
+                                            (message.replyToMessageId == null ||
+                                                message
+                                                    .replyToMessageId!
+                                                    .isEmpty)
+                                            ? null
+                                            : () => _onReplyPreviewTapped(
+                                                message.replyToMessageId,
+                                              ),
                                       ),
-                                    MessageBubble(
-                                      key: ValueKey(message.id),
-                                      message: message,
-                                      reactionsController: _reactionsController,
-                                      onReactionChanged: () => setState(() {}),
-                                    ),
-                                  ],
+                                    ],
+                                  ),
                                 );
                               },
                             ),
