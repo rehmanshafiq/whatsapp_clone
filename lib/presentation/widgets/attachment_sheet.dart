@@ -78,17 +78,10 @@ class _AttachmentSheet extends StatelessWidget {
         },
       );
     } else {
-      final status = await Permission.photos.status;
-      if (status.isPermanentlyDenied && context.mounted) {
-        await PermissionUtils.requestPermission(
-          context,
-          Permission.photos,
-          title: 'Gallery Permission',
-          message: 'Gallery permission is required to select photos and videos. Please allow it in settings.',
-        );
+      if (context.mounted) {
+        await PermissionUtils.requestStoragePermission(context);
       }
     }
-
   }
 
   void _openCamera(BuildContext context) async {
@@ -98,6 +91,7 @@ class _AttachmentSheet extends StatelessWidget {
       title: 'Camera Permission',
       message: 'Camera permission is required to take photos and videos. Please allow it in settings.',
     );
+
     if (granted && context.mounted) {
       Navigator.pop(context);
       Navigator.push(

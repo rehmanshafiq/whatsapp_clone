@@ -415,10 +415,20 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
             sendRequestFunction: (File soundFile, String time) {
               _handleAudioSend(soundFile, time);
             },
-            startRecording: () {
+            startRecording: () async {
               widget.onTypingStop?.call();
               widget.onRecordingStart?.call();
+              final status = await Permission.microphone.status;
+              if (status.isPermanentlyDenied && context.mounted) {
+                await PermissionUtils.requestPermission(
+                  context,
+                  Permission.microphone,
+                  title: 'Microphone Permission',
+                  message: 'Microphone permission is required to record voice notes. Please allow it in settings.',
+                );
+              }
             },
+
             stopRecording: (_) {
               widget.onRecordingStop?.call();
             },
@@ -582,17 +592,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               IconButton(
                 icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
                 onPressed: () async {
-                  final granted = await PermissionUtils.requestPermission(
-                    context,
-                    Permission.storage, // Or photos/videos on Android 13+
-                    title: 'Storage Permission',
-                    message: 'Storage permission is required to attach files. Please allow it in settings.',
-                  );
+                  final granted = await PermissionUtils.requestStoragePermission(context);
                   if (granted && context.mounted) {
                     showAttachmentSheet(context, widget.channelId);
                   }
                 },
               ),
+
               // Camera icon only visible when no text has been entered
               if (!_hasText)
                 IconButton(

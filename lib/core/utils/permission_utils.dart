@@ -50,4 +50,32 @@ class PermissionUtils {
 
     return false;
   }
+
+  /// Requests storage/photos permission based on Android version.
+  static Future<bool> requestStoragePermission(BuildContext context) async {
+    // On Android 13+, we should check READ_MEDIA_IMAGES (mapped to Permission.photos)
+    // On Android 12 and below, we check READ_EXTERNAL_STORAGE (mapped to Permission.storage)
+    
+    // Attempt photos first as it's the more specific modern one.
+    // If it's not supported or not in manifest (older device), fallback to storage.
+    Permission permissionToRequest = Permission.photos;
+    
+    // Check if the permission is available in the manifest/system.
+    // status.isDenied is a safe check.
+    try {
+      final status = await Permission.photos.status;
+      // Note: No permissions found in manifest error is thrown if we try to request 
+      // something not there. But status usually doesn't throw, it just returns restricted.
+    } catch (_) {
+      permissionToRequest = Permission.storage;
+    }
+
+    return await requestPermission(
+      context,
+      permissionToRequest,
+      title: permissionToRequest == Permission.photos ? 'Gallery Permission' : 'Storage Permission',
+      message: 'Permission is required to access files. Please allow it in settings.',
+    );
+  }
 }
+
