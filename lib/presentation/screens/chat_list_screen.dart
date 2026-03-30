@@ -650,7 +650,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
       final newState = channel.isMuted ? 'unmuted' : 'muted';
       ScaffoldMessenger.of(ctx).showSnackBar(
         SnackBar(
-          content: Text('Chat $newState'),
+          content: Text('Chat $newState', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500),),
           backgroundColor: AppColors.appBar,
           duration: const Duration(seconds: 2),
         ),
@@ -721,7 +721,9 @@ class _ChatListScreenState extends State<ChatListScreen> {
       if (!ctx.mounted) return;
       ScaffoldMessenger.of(ctx).showSnackBar(
         const SnackBar(
-          content: Text('Chat cleared'),
+          content: Text(
+            'Chat cleared', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w500,),
+          ),
           backgroundColor: AppColors.appBar,
           duration: Duration(seconds: 2),
         ),

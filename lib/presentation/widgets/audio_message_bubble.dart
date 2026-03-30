@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 
-import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
@@ -20,7 +19,15 @@ import 'forwarded_label.dart';
 class AudioMessageBubble extends StatefulWidget {
   final Message message;
 
-  const AudioMessageBubble({super.key, required this.message});
+  /// Auth headers (Bearer + x-api-key) for downloading protected audio files.
+  /// Pass `context.read<ChatCubit>().authHeadersForMedia` from the parent.
+  final Map<String, String>? authHeaders;
+
+  const AudioMessageBubble({
+    super.key,
+    required this.message,
+    this.authHeaders,
+  });
 
   @override
   State<AudioMessageBubble> createState() => _AudioMessageBubbleState();
@@ -30,14 +37,20 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     with SingleTickerProviderStateMixin {
   final AudioPlaybackService _playbackService = getIt<AudioPlaybackService>();
   bool _isPlaying = false;
+
+  /// True as soon as this message is selected in the playback service —
+  /// before playback actually starts (remote audio may still be buffering).
+  /// Enables waveform seeking immediately on tap.
+  bool _isActive = false;
+
   Duration _position = Duration.zero;
   Duration _totalDuration = Duration.zero;
   double _playbackSpeed = 1.0;
   bool _isSeeking = false;
+  bool _isSyncingDuration = false;
   bool _isPreparingRemoteAudio = false;
   String? _cachedRemoteFilePath;
 
-  // Swipe-to-action animation state
   static const double _swipeTrigger = 64.0;
   static const double _swipeMax = 100.0;
   late final AnimationController _swipeController;
@@ -67,13 +80,20 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
 
     _playingIdSub = _playbackService.playingIdStream.listen((id) {
       if (!mounted) return;
-      final playing =
-          id == widget.message.id &&
-          _playbackService.state == PlayerState.playing;
-      if (playing != _isPlaying) {
-        setState(() => _isPlaying = playing);
+      final isThis = id == widget.message.id;
+      final playing = isThis && _playbackService.isPlaying;
+
+      // Rebuild whenever either flag changes. _isActive flips true the moment
+      // the user taps play — before playback actually starts — so seek
+      // gestures attach immediately, even for remote/buffering audio.
+      if (isThis != _isActive || playing != _isPlaying) {
+        setState(() {
+          _isActive = isThis;
+          _isPlaying = playing;
+        });
       }
-      if (id != widget.message.id) {
+
+      if (!isThis) {
         if (_position != Duration.zero || _playbackSpeed != 1.0) {
           setState(() {
             _position = Duration.zero;
@@ -88,19 +108,21 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     _positionSub = _playbackService.positionStream.listen((pos) {
       if (!mounted || !_isThisMessage || _isSeeking) return;
       setState(() => _position = pos);
+      if (_totalDuration <= Duration.zero) {
+        unawaited(_syncDurationFromPlayer());
+      }
     });
 
     _durationSub = _playbackService.durationStream.listen((dur) {
       if (!mounted || !_isThisMessage) return;
-      if (dur > Duration.zero) {
-        setState(() => _totalDuration = dur);
-      }
+      if (dur > Duration.zero) setState(() => _totalDuration = dur);
     });
 
     _completionSub = _playbackService.completionStream.listen((_) {
       if (!mounted) return;
       setState(() {
         _isPlaying = false;
+        _isActive = false;
         _position = Duration.zero;
         _playbackSpeed = 1.0;
       });
@@ -117,60 +139,83 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     super.dispose();
   }
 
-  void _togglePlayback() {
-    unawaited(_togglePlaybackInternal());
-  }
+  void _togglePlayback() => unawaited(_togglePlaybackInternal());
 
   Future<void> _togglePlaybackInternal() async {
-    // Prefer explicit audioPath (local recording). Fall back to mediaUrl
-    // for audio/voice messages coming from the server that only provide
-    // attachment_url.
     final path = widget.message.audioPath ?? widget.message.mediaUrl;
     if (path == null) return;
-    // Only treat as server-relative if it looks like backend path (/uploads/...).
-    // Do NOT prepend baseUrl for local absolute paths (e.g. /data/user/0/... on Android).
+
+    // Resolve server-relative paths to full URLs.
     final resolvedPath = path.startsWith('/uploads/')
         ? '${AppConstants.apiBaseUrl}$path'
         : path;
+
     final playablePath = await _resolvePlayablePath(resolvedPath);
     if (playablePath == null) return;
-    await _playbackService.play(widget.message.id, playablePath);
+
+    final streamHeaders =
+        playablePath.startsWith('http') ? widget.authHeaders : null;
+    await _playbackService.play(
+      widget.message.id,
+      playablePath,
+      headers: streamHeaders,
+    );
     if (_totalDuration <= Duration.zero) {
       unawaited(_syncDurationFromPlayer());
     }
   }
 
+  /// Downloads remote audio to a correctly-named temp file using auth headers.
+  /// Falls back to direct URL streaming if download fails.
   Future<String?> _resolvePlayablePath(String resolvedPath) async {
+    // Local file — just verify it exists.
     if (!resolvedPath.startsWith('http')) {
       return File(resolvedPath).existsSync() ? resolvedPath : null;
     }
 
+    // Return cached local copy if still valid.
     final cachedPath = _cachedRemoteFilePath;
     if (cachedPath != null && File(cachedPath).existsSync()) {
       return cachedPath;
     }
-    if (_isPreparingRemoteAudio) {
-      return resolvedPath;
-    }
+
+    // Another download is already running — stream directly in the meantime.
+    if (_isPreparingRemoteAudio) return resolvedPath;
 
     _isPreparingRemoteAudio = true;
     try {
       final uri = Uri.tryParse(resolvedPath);
       if (uri == null) return resolvedPath;
 
+      // ── Correct file extension ────────────────────────────────────────────
+      // Must derive extension from the *source URL* so .webm files are saved
+      // as .webm — not silently renamed to .m4a — so Android decoders can
+      // reliably parse and seek voice notes produced by web clients.
+      final ext = _inferAudioExtension(uri.path);
+
       final tempDir = await getTemporaryDirectory();
-      final localPath =
-          '${tempDir.path}/audio_${widget.message.id}${_inferAudioExtension(uri.path)}';
+      final localPath = '${tempDir.path}/audio_${widget.message.id}$ext';
       final localFile = File(localPath);
 
       if (!localFile.existsSync() || localFile.lengthSync() == 0) {
         final client = HttpClient();
         try {
           final request = await client.getUrl(uri);
+
+          // ── Auth headers ──────────────────────────────────────────────────
+          // /uploads/ files are protected. Without Bearer + x-api-key the
+          // server returns 401, the download fails silently, and the player
+          // either can't open the file or tries to stream without auth.
+          widget.authHeaders?.forEach((key, value) {
+            request.headers.set(key, value);
+          });
+
           final response = await request.close();
           if (response.statusCode < 200 || response.statusCode >= 300) {
+            // Auth failed or file not found — fall back to URL streaming.
             return resolvedPath;
           }
+
           final sink = localFile.openWrite();
           await for (final chunk in response) {
             sink.add(chunk);
@@ -186,7 +231,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
         return localFile.path;
       }
     } catch (_) {
-      // Fall back to direct URL playback when local caching fails.
+      // Any error → fall back to direct URL streaming.
     } finally {
       _isPreparingRemoteAudio = false;
     }
@@ -194,72 +239,60 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     return resolvedPath;
   }
 
+  /// Returns the correct extension for [sourcePath].
+  /// Handles all formats the backend may produce, including .webm (Chrome/Opus).
   String _inferAudioExtension(String sourcePath) {
     final lower = sourcePath.toLowerCase();
-    if (lower.endsWith('.m4a')) return '.m4a';
-    if (lower.endsWith('.aac')) return '.aac';
-    if (lower.endsWith('.mp3')) return '.mp3';
-    if (lower.endsWith('.wav')) return '.wav';
+    if (lower.endsWith('.m4a'))  return '.m4a';
+    if (lower.endsWith('.aac'))  return '.aac';
+    if (lower.endsWith('.mp3'))  return '.mp3';
+    if (lower.endsWith('.wav'))  return '.wav';
+    if (lower.endsWith('.webm')) return '.webm'; // ← was missing
     if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return '.ogg';
     if (lower.endsWith('.opus')) return '.opus';
     return '.m4a';
   }
 
   void _cycleSpeed() {
-    final currentIndex = _speeds.indexOf(_playbackSpeed);
-    final nextIndex = (currentIndex + 1) % _speeds.length;
-    final newSpeed = _speeds[nextIndex];
+    final idx = _speeds.indexOf(_playbackSpeed);
+    final newSpeed = _speeds[(idx + 1) % _speeds.length];
     setState(() => _playbackSpeed = newSpeed);
-    if (_isThisMessage) {
-      _playbackService.setPlaybackRate(newSpeed);
-    }
+    if (_isThisMessage) _playbackService.setPlaybackRate(newSpeed);
   }
 
-  void _onDragStart() {
-    if (!_isThisMessage) return;
-    _isSeeking = true;
-  }
+  void _onDragStart() { if (_isActive) _isSeeking = true; }
 
   void _onDragUpdate(double fraction) {
-    if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
-    final clamped = fraction.clamp(0.0, 1.0);
+    if (!_isActive || _totalDuration.inMilliseconds <= 0) return;
     setState(() {
       _position = Duration(
-        milliseconds: (clamped * _totalDuration.inMilliseconds).round(),
+        milliseconds:
+        (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds)
+            .round(),
       );
     });
   }
 
-  void _onDragEnd(DragEndDetails details) {
-    if (!_isThisMessage) return;
+  void _onDragEnd(DragEndDetails _) {
+    if (!_isActive) return;
     _isSeeking = false;
     _playbackService.seek(_position);
   }
 
-  void _onDragCancel() {
-    if (!_isThisMessage) return;
-    _isSeeking = false;
-  }
+  void _onDragCancel() { if (_isActive) _isSeeking = false; }
 
-  // ── Swipe-to-action animation ───────────────────────────────────
-  void _onSwipeDragUpdate(DragUpdateDetails details) {
-    final dx = details.delta.dx;
-    _swipeDragExtent = (_swipeDragExtent + dx).clamp(0.0, double.infinity);
+  void _onSwipeDragUpdate(DragUpdateDetails d) {
+    _swipeDragExtent =
+        (_swipeDragExtent + d.delta.dx).clamp(0.0, double.infinity);
     _swipeController.value = math.min(_swipeDragExtent, _swipeMax);
-
     if (!_swipeHapticFired && _swipeDragExtent >= _swipeTrigger) {
       _swipeHapticFired = true;
       HapticFeedback.mediumImpact();
     }
   }
 
-  void _onSwipeDragEnd(DragEndDetails details) {
-    _finishSwipe();
-  }
-
-  void _onSwipeDragCancel() {
-    _finishSwipe();
-  }
+  void _onSwipeDragEnd(DragEndDetails _) => _finishSwipe();
+  void _onSwipeDragCancel() => _finishSwipe();
 
   void _finishSwipe() {
     final triggered = _swipeDragExtent >= _swipeTrigger;
@@ -267,73 +300,69 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     _swipeHapticFired = false;
 
     if (_swipeController.value == 0) {
-      if (triggered && mounted) {
-        MessageActionSheet.show(context, widget.message);
-      }
+      if (triggered && mounted) MessageActionSheet.show(context, widget.message);
       return;
     }
-
-    final springDesc = SpringDescription(mass: 1, stiffness: 300, damping: 22);
-    final simulation = SpringSimulation(
-      springDesc, _swipeController.value, 0, 0,
-    );
-    _swipeController.animateWith(simulation).then((_) {
-      if (triggered && mounted) {
-        MessageActionSheet.show(context, widget.message);
-      }
+    _swipeController
+        .animateWith(SpringSimulation(
+      SpringDescription(mass: 1, stiffness: 300, damping: 22),
+      _swipeController.value, 0, 0,
+    ))
+        .then((_) {
+      if (triggered && mounted) MessageActionSheet.show(context, widget.message);
     });
   }
 
   void _onTapSeek(double fraction) {
-    if (!_isThisMessage || _totalDuration.inMilliseconds <= 0) return;
-    final clamped = fraction.clamp(0.0, 1.0);
-    final seekPos = Duration(
-      milliseconds: (clamped * _totalDuration.inMilliseconds).round(),
+    if (!_isActive || _totalDuration.inMilliseconds <= 0) return;
+    final pos = Duration(
+      milliseconds:
+      (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds).round(),
     );
-    setState(() => _position = seekPos);
-    _playbackService.seek(seekPos);
+    setState(() => _position = pos);
+    _playbackService.seek(pos);
   }
 
   Future<void> _syncDurationFromPlayer() async {
-    // Remote audio can report duration a bit later than play() call.
-    // Probe briefly so waveform seeking activates as soon as metadata arrives.
-    for (var i = 0; i < 6; i++) {
-      if (!mounted || !_isThisMessage) return;
-      final duration = await _playbackService.getDuration();
-      if (!mounted || !_isThisMessage) return;
-      if (duration != null && duration > Duration.zero) {
-        if (_totalDuration != duration) {
-          setState(() => _totalDuration = duration);
+    if (_isSyncingDuration) return;
+    _isSyncingDuration = true;
+    try {
+      // Remote audio can report duration late (after buffering/index parsing).
+      for (var i = 0; i < 30; i++) {
+        if (!mounted || !_isThisMessage) return;
+        final dur = await _playbackService.getDuration();
+        if (!mounted || !_isThisMessage) return;
+        if (dur != null && dur > Duration.zero) {
+          if (_totalDuration != dur) setState(() => _totalDuration = dur);
+          return;
         }
-        return;
+        await Future<void>.delayed(const Duration(milliseconds: 300));
       }
-      await Future<void>.delayed(const Duration(milliseconds: 200));
+    } finally {
+      _isSyncingDuration = false;
     }
   }
 
-  String _formatDuration(Duration d) {
-    final m = d.inMinutes.remainder(60).toString().padLeft(2, '0');
-    final s = d.inSeconds.remainder(60).toString().padLeft(2, '0');
-    return '$m:$s';
-  }
+  String _formatDuration(Duration d) =>
+      '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:'
+          '${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
 
   @override
   Widget build(BuildContext context) {
     final isOutgoing = widget.message.isOutgoing;
-    final period = widget.message.timestamp.hour >= 12 ? 'PM' : 'AM';
     final hourRaw = widget.message.timestamp.hour % 12;
+    final period = widget.message.timestamp.hour >= 12 ? 'PM' : 'AM';
     final time =
-        '${hourRaw == 0 ? 12 : hourRaw}:${widget.message.timestamp.minute.toString().padLeft(2, '0')} $period';
+        '${hourRaw == 0 ? 12 : hourRaw}:'
+        '${widget.message.timestamp.minute.toString().padLeft(2, '0')} $period';
 
-    final displayDuration = _isPlaying || _isThisMessage
-        ? _position
-        : Duration.zero;
+    final displayDuration = _isActive ? _position : Duration.zero;
     final progress = _totalDuration.inMilliseconds > 0
         ? (displayDuration.inMilliseconds / _totalDuration.inMilliseconds)
-              .clamp(0.0, 1.0)
+        .clamp(0.0, 1.0)
         : 0.0;
 
-    final bubbleContent = Container(
+    final bubble = Container(
       constraints: BoxConstraints(
         maxWidth: MediaQuery.of(context).size.width * 0.75,
         minWidth: 220,
@@ -346,9 +375,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
-        color: isOutgoing
-            ? AppColors.outgoingBubble
-            : AppColors.incomingBubble,
+        color: isOutgoing ? AppColors.outgoingBubble : AppColors.incomingBubble,
         borderRadius: BorderRadius.only(
           topLeft: const Radius.circular(12),
           topRight: const Radius.circular(12),
@@ -360,8 +387,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (widget.message.isForwarded)
-            const ForwardedLabel(),
+          if (widget.message.isForwarded) const ForwardedLabel(),
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -372,90 +398,86 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
               ),
               const SizedBox(width: 8),
               Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _SeekableWaveformBar(
-                  progress: progress,
-                  isOutgoing: isOutgoing,
-                  seekEnabled: _isThisMessage,
-                  onTapSeek: _onTapSeek,
-                  onDragStart: _onDragStart,
-                  onDragUpdate: _onDragUpdate,
-                  onDragEnd: _onDragEnd,
-                  onDragCancel: _onDragCancel,
-                ),
-                const SizedBox(height: 4),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          _isPlaying || _isThisMessage
-                              ? _formatDuration(_position)
-                              : _formatDuration(_totalDuration),
-                          style: TextStyle(
-                            color: AppColors.textSecondary.withValues(
-                              alpha: 0.8,
-                            ),
-                            fontSize: 11,
-                          ),
-                        ),
-                        if (_isThisMessage) ...[
-                          const SizedBox(width: 6),
-                          _SpeedButton(
-                            speed: _playbackSpeed,
-                            onTap: _cycleSpeed,
-                            isOutgoing: isOutgoing,
-                          ),
-                        ],
-                      ],
+                    _SeekableWaveformBar(
+                      progress: progress,
+                      isOutgoing: isOutgoing,
+                      seekEnabled: _isActive,
+                      onTapSeek: _onTapSeek,
+                      onDragStart: _onDragStart,
+                      onDragUpdate: _onDragUpdate,
+                      onDragEnd: _onDragEnd,
+                      onDragCancel: _onDragCancel,
                     ),
+                    const SizedBox(height: 4),
                     Row(
-                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
-                        Text(
-                          time,
-                          style: TextStyle(
-                            color: AppColors.textSecondary.withValues(
-                              alpha: 0.7,
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              _isActive
+                                  ? _formatDuration(_position)
+                                  : _formatDuration(_totalDuration),
+                              style: TextStyle(
+                                color: AppColors.textSecondary
+                                    .withValues(alpha: 0.8),
+                                fontSize: 11,
+                              ),
                             ),
-                            fontSize: 11,
-                          ),
+                            if (_isActive) ...[
+                              const SizedBox(width: 6),
+                              _SpeedButton(
+                                speed: _playbackSpeed,
+                                onTap: _cycleSpeed,
+                                isOutgoing: isOutgoing,
+                              ),
+                            ],
+                          ],
                         ),
-                        if (isOutgoing) ...[
-                          const SizedBox(width: 4),
-                          MessageStatusIcon(
-                            status: widget.message.status,
-                            size: 14,
-                          ),
-                        ],
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              time,
+                              style: TextStyle(
+                                color: AppColors.textSecondary
+                                    .withValues(alpha: 0.7),
+                                fontSize: 11,
+                              ),
+                            ),
+                            if (isOutgoing) ...[
+                              const SizedBox(width: 4),
+                              MessageStatusIcon(
+                                  status: widget.message.status, size: 14),
+                            ],
+                          ],
+                        ),
                       ],
                     ),
                   ],
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ],
-      ),
-      ],
       ),
     );
 
     return GestureDetector(
-      onHorizontalDragUpdate: _isThisMessage ? null : _onSwipeDragUpdate,
-      onHorizontalDragEnd: _isThisMessage ? null : _onSwipeDragEnd,
-      onHorizontalDragCancel: _isThisMessage ? null : _onSwipeDragCancel,
+      // While this track is active, pass horizontal drags to the waveform.
+      onHorizontalDragUpdate: _isActive ? null : _onSwipeDragUpdate,
+      onHorizontalDragEnd: _isActive ? null : _onSwipeDragEnd,
+      onHorizontalDragCancel: _isActive ? null : _onSwipeDragCancel,
       child: AnimatedBuilder(
         animation: _swipeController,
         builder: (context, child) {
           final dx = _swipeController.value;
-          final swipeProgress = (dx / _swipeTrigger).clamp(0.0, 1.0);
-
+          final p = (dx / _swipeTrigger).clamp(0.0, 1.0);
           return Stack(
             clipBehavior: Clip.none,
             children: [
@@ -467,42 +489,34 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
                 child: Align(
                   alignment: Alignment.center,
                   child: Opacity(
-                    opacity: swipeProgress,
+                    opacity: p,
                     child: Transform.scale(
-                      scale: 0.4 + swipeProgress * 0.6,
+                      scale: 0.4 + p * 0.6,
                       child: Container(
                         width: 34,
                         height: 34,
                         decoration: BoxDecoration(
-                          color: AppColors.accent.withValues(
-                            alpha: 0.18 + swipeProgress * 0.22,
-                          ),
+                          color: AppColors.accent
+                              .withValues(alpha: 0.18 + p * 0.22),
                           shape: BoxShape.circle,
                         ),
-                        child: Icon(
-                          Icons.reply,
-                          size: 18,
-                          color: AppColors.accent.withValues(
-                            alpha: 0.5 + swipeProgress * 0.5,
-                          ),
-                        ),
+                        child: Icon(Icons.reply,
+                            size: 18,
+                            color: AppColors.accent
+                                .withValues(alpha: 0.5 + p * 0.5)),
                       ),
                     ),
                   ),
                 ),
               ),
-              Transform.translate(
-                offset: Offset(dx, 0),
-                child: child,
-              ),
+              Transform.translate(offset: Offset(dx, 0), child: child),
             ],
           );
         },
         child: Align(
-          alignment: isOutgoing
-              ? Alignment.centerRight
-              : Alignment.centerLeft,
-          child: bubbleContent,
+          alignment:
+          isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+          child: bubble,
         ),
       ),
     );
@@ -513,50 +527,42 @@ class _PlayPauseButton extends StatelessWidget {
   final bool isPlaying;
   final VoidCallback onTap;
   final bool isOutgoing;
-
-  const _PlayPauseButton({
-    required this.isPlaying,
-    required this.onTap,
-    required this.isOutgoing,
-  });
+  const _PlayPauseButton(
+      {required this.isPlaying,
+        required this.onTap,
+        required this.isOutgoing});
 
   @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 40,
-        height: 40,
-        decoration: BoxDecoration(
-          color: isOutgoing
-              ? AppColors.accent.withValues(alpha: 0.3)
-              : AppColors.divider,
-          shape: BoxShape.circle,
-        ),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 200),
-          child: Icon(
-            isPlaying ? Icons.pause : Icons.play_arrow,
-            key: ValueKey(isPlaying),
-            color: AppColors.textPrimary,
-            size: 24,
-          ),
+  Widget build(BuildContext context) => GestureDetector(
+    onTap: onTap,
+    child: Container(
+      width: 40,
+      height: 40,
+      decoration: BoxDecoration(
+        color: isOutgoing
+            ? AppColors.accent.withValues(alpha: 0.3)
+            : AppColors.divider,
+        shape: BoxShape.circle,
+      ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 200),
+        child: Icon(
+          isPlaying ? Icons.pause : Icons.play_arrow,
+          key: ValueKey(isPlaying),
+          color: AppColors.textPrimary,
+          size: 24,
         ),
       ),
-    );
-  }
+    ),
+  );
 }
 
 class _SpeedButton extends StatelessWidget {
   final double speed;
   final VoidCallback onTap;
   final bool isOutgoing;
-
-  const _SpeedButton({
-    required this.speed,
-    required this.onTap,
-    required this.isOutgoing,
-  });
+  const _SpeedButton(
+      {required this.speed, required this.onTap, required this.isOutgoing});
 
   @override
   Widget build(BuildContext context) {
@@ -571,14 +577,11 @@ class _SpeedButton extends StatelessWidget {
               : AppColors.divider.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(
-          label,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 10,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
+        child: Text(label,
+            style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontSize: 10,
+                fontWeight: FontWeight.w600)),
       ),
     );
   }
@@ -607,49 +610,37 @@ class _SeekableWaveformBar extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        const barWidth = 2.5;
-        const barSpacing = 1.5;
-        final barCount = (constraints.maxWidth / (barWidth + barSpacing))
-            .floor()
-            .clamp(1, 40);
-        final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;
+    return LayoutBuilder(builder: (context, constraints) {
+      const bw = 2.5, bs = 1.5;
+      final barCount =
+      (constraints.maxWidth / (bw + bs)).floor().clamp(1, 40);
+      final totalW = barCount * (bw + bs) - bs;
+      double frac(double dx) => (dx / totalW).clamp(0.0, 1.0);
 
-        double fractionFromX(double dx) =>
-            (dx / totalBarsWidth).clamp(0.0, 1.0);
+      final paint = CustomPaint(
+        size: Size(constraints.maxWidth, 28),
+        painter: _WaveformPainter(
+          progress: progress,
+          activeColor: isOutgoing ? AppColors.textPrimary : AppColors.accent,
+          inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
+        ),
+      );
 
-        final waveformPaint = CustomPaint(
-          size: Size(constraints.maxWidth, 28),
-          painter: _WaveformPainter(
-            progress: progress,
-            activeColor: isOutgoing
-                ? AppColors.textPrimary
-                : AppColors.accent,
-            inactiveColor: AppColors.textSecondary.withValues(alpha: 0.3),
-          ),
-        );
+      if (!seekEnabled) return paint;
 
-        if (!seekEnabled) return waveformPaint;
-
-        return GestureDetector(
-          behavior: HitTestBehavior.opaque,
-          onTapUp: (details) {
-            onTapSeek(fractionFromX(details.localPosition.dx));
-          },
-          onHorizontalDragStart: (details) {
-            onDragStart();
-            onDragUpdate(fractionFromX(details.localPosition.dx));
-          },
-          onHorizontalDragUpdate: (details) {
-            onDragUpdate(fractionFromX(details.localPosition.dx));
-          },
-          onHorizontalDragEnd: onDragEnd,
-          onHorizontalDragCancel: onDragCancel,
-          child: waveformPaint,
-        );
-      },
-    );
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) => onTapSeek(frac(d.localPosition.dx)),
+        onHorizontalDragStart: (d) {
+          onDragStart();
+          onDragUpdate(frac(d.localPosition.dx));
+        },
+        onHorizontalDragUpdate: (d) => onDragUpdate(frac(d.localPosition.dx)),
+        onHorizontalDragEnd: onDragEnd,
+        onHorizontalDragCancel: onDragCancel,
+        child: paint,
+      );
+    });
   }
 }
 
@@ -664,86 +655,38 @@ class _WaveformPainter extends CustomPainter {
     required this.inactiveColor,
   });
 
-  static const _barHeights = [
-    0.3,
-    0.5,
-    0.7,
-    0.4,
-    0.9,
-    0.6,
-    0.8,
-    0.3,
-    0.7,
-    0.5,
-    0.6,
-    0.9,
-    0.4,
-    0.8,
-    0.3,
-    0.7,
-    0.5,
-    0.9,
-    0.6,
-    0.4,
-    0.8,
-    0.3,
-    0.7,
-    0.5,
-    0.9,
-    0.4,
-    0.6,
-    0.8,
-    0.3,
-    0.7,
-    0.5,
-    0.4,
-    0.8,
-    0.6,
-    0.9,
-    0.3,
-    0.7,
-    0.5,
-    0.4,
-    0.8,
+  static const _h = [
+    0.3, 0.5, 0.7, 0.4, 0.9, 0.6, 0.8, 0.3, 0.7, 0.5,
+    0.6, 0.9, 0.4, 0.8, 0.3, 0.7, 0.5, 0.9, 0.6, 0.4,
+    0.8, 0.3, 0.7, 0.5, 0.9, 0.4, 0.6, 0.8, 0.3, 0.7,
+    0.5, 0.4, 0.8, 0.6, 0.9, 0.3, 0.7, 0.5, 0.4, 0.8,
   ];
 
   @override
   void paint(Canvas canvas, Size size) {
-    const barWidth = 2.5;
-    const barSpacing = 1.5;
-    final barCount = (size.width / (barWidth + barSpacing)).floor().clamp(
-      1,
-      _barHeights.length,
-    );
-
-    // The actual width the waveform bars occupy (last bar has no trailing gap)
-    final totalBarsWidth = barCount * (barWidth + barSpacing) - barSpacing;
-    // Map the seek dot to the waveform width, not full canvas width
-    final progressX = totalBarsWidth * progress;
+    const bw = 2.5, bs = 1.5;
+    final barCount =
+    (size.width / (bw + bs)).floor().clamp(1, _h.length);
+    final totalW = barCount * (bw + bs) - bs;
+    final px = totalW * progress;
 
     for (int i = 0; i < barCount; i++) {
-      final x = i * (barWidth + barSpacing);
-      final barCenter = x + barWidth / 2;
-      final heightFactor = _barHeights[i % _barHeights.length];
-      final barHeight = size.height * heightFactor;
-      final y = (size.height - barHeight) / 2;
-
-      final paint = Paint()
-        ..color = barCenter <= progressX ? activeColor : inactiveColor
-        ..style = PaintingStyle.fill;
-
+      final x = i * (bw + bs);
+      final bh = size.height * _h[i % _h.length];
       canvas.drawRRect(
         RRect.fromRectAndRadius(
-          Rect.fromLTWH(x, y, barWidth, barHeight),
+          Rect.fromLTWH(x, (size.height - bh) / 2, bw, bh),
           const Radius.circular(1.5),
         ),
-        paint,
+        Paint()
+          ..color = (x + bw / 2) <= px ? activeColor : inactiveColor
+          ..style = PaintingStyle.fill,
       );
     }
 
     if (progress > 0 && progress < 1) {
       canvas.drawCircle(
-        Offset(progressX.clamp(0.0, totalBarsWidth), size.height / 2),
+        Offset(px.clamp(0.0, totalW), size.height / 2),
         4.0,
         Paint()..color = activeColor,
       );
@@ -751,6 +694,6 @@ class _WaveformPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _WaveformPainter oldDelegate) =>
-      oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _WaveformPainter old) =>
+      old.progress != progress;
 }

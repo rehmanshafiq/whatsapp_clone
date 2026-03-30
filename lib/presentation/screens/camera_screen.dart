@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 import 'package:photo_manager/photo_manager.dart';
 import 'package:photo_manager_image_provider/photo_manager_image_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'dart:async';
 import 'dart:io';
 
 import '../../core/theme/app_theme.dart';
@@ -17,7 +18,8 @@ class CameraScreen extends StatefulWidget {
   State<CameraScreen> createState() => _CameraScreenState();
 }
 
-class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver {
+class _CameraScreenState extends State<CameraScreen>
+    with WidgetsBindingObserver {
   CameraController? _controller;
   List<CameraDescription> _cameras = [];
   bool _isCameraInitialized = false;
@@ -27,6 +29,8 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   bool _hasPermissionError = false;
   bool _isAudioEnabled = true;
+  bool _hasCameraPermission = false;
+  bool _isInitializingCamera = false;
 
   List<AssetEntity> _recentMedia = [];
   bool _isLoadingMedia = true;
@@ -36,22 +40,28 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initScanner();
-    _fetchRecentMedia();
   }
 
   Future<void> _initScanner() async {
     try {
       final cameraStatus = await Permission.camera.request();
       final micStatus = await Permission.microphone.request();
+      if (!mounted) return;
 
-      if (cameraStatus.isGranted) {
-        _cameras = await availableCameras();
-        if (_cameras.isNotEmpty) {
-          _isAudioEnabled = micStatus.isGranted;
-          await _initCamera(_cameras[_selectedCameraIndex]);
-        } else {
-          if (mounted) setState(() => _hasPermissionError = true);
-        }
+      if (!cameraStatus.isGranted) {
+        setState(() => _hasPermissionError = true);
+        return;
+      }
+
+      _hasCameraPermission = true;
+      _isAudioEnabled = micStatus.isGranted;
+
+      _cameras = await availableCameras();
+      if (_cameras.isNotEmpty) {
+        await _initCamera(_cameras[_selectedCameraIndex]);
+        // Request gallery permission after camera is ready to avoid first-install
+        // permission-dialog races that can stall camera initialization.
+        unawaited(_fetchRecentMedia());
       } else {
         if (mounted) setState(() => _hasPermissionError = true);
       }
@@ -62,7 +72,17 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _initCamera(CameraDescription camera) async {
+    if (_isInitializingCamera) return;
+    _isInitializingCamera = true;
+
     final prevController = _controller;
+    _controller = null;
+
+    if (mounted) {
+      setState(() => _isCameraInitialized = false);
+    } else {
+      _isCameraInitialized = false;
+    }
 
     // Must dispose of the old camera before initializing the new one,
     // otherwise hardware locks prevent the new camera from starting.
@@ -82,7 +102,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     _controller = newController;
 
     try {
-      await newController.initialize();
+      await newController.initialize().timeout(const Duration(seconds: 15));
       await newController.setFlashMode(_flashMode);
       if (mounted) {
         setState(() {
@@ -90,9 +110,22 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
           _hasPermissionError = false;
         });
       }
+    } on TimeoutException catch (e) {
+      debugPrint('Camera init timeout: $e');
+      await newController.dispose();
+      if (identical(_controller, newController)) {
+        _controller = null;
+      }
+      if (mounted) setState(() => _hasPermissionError = true);
     } catch (e) {
       debugPrint('Camera init error: $e');
+      await newController.dispose();
+      if (identical(_controller, newController)) {
+        _controller = null;
+      }
       if (mounted) setState(() => _hasPermissionError = true);
+    } finally {
+      _isInitializingCamera = false;
     }
   }
 
@@ -104,7 +137,10 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
         onlyAll: true,
       );
       if (albums.isNotEmpty) {
-        List<AssetEntity> media = await albums[0].getAssetListPaged(page: 0, size: 30);
+        List<AssetEntity> media = await albums[0].getAssetListPaged(
+          page: 0,
+          size: 30,
+        );
         if (mounted) {
           setState(() {
             _recentMedia = media;
@@ -128,18 +164,38 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (_controller == null || !_controller!.value.isInitialized) {
+    if (state == AppLifecycleState.inactive ||
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      final controller = _controller;
+      _controller = null;
+
+      if (mounted) {
+        setState(() => _isCameraInitialized = false);
+      } else {
+        _isCameraInitialized = false;
+      }
+
+      if (controller != null) {
+        unawaited(controller.dispose());
+      }
       return;
     }
-    if (state == AppLifecycleState.inactive) {
-      _controller?.dispose();
-    } else if (state == AppLifecycleState.resumed) {
-      _initCamera(_cameras[_selectedCameraIndex]);
+
+    if (state == AppLifecycleState.resumed &&
+        _hasCameraPermission &&
+        _cameras.isNotEmpty &&
+        !_isInitializingCamera) {
+      unawaited(_initCamera(_cameras[_selectedCameraIndex]));
     }
   }
 
   Future<void> _takePicture() async {
-    if (_controller == null || !_controller!.value.isInitialized || _isRecording) return;
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isRecording) {
+      return;
+    }
     try {
       final XFile picture = await _controller!.takePicture();
       _openPreviewScreen(picture.path, false);
@@ -149,7 +205,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _startVideoRecording() async {
-    if (_controller == null || !_controller!.value.isInitialized || _isRecording) return;
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isRecording) {
+      return;
+    }
     try {
       await _controller!.startVideoRecording();
       setState(() => _isRecording = true);
@@ -159,7 +219,11 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
   }
 
   Future<void> _stopVideoRecording() async {
-    if (_controller == null || !_controller!.value.isInitialized || !_isRecording) return;
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        !_isRecording) {
+      return;
+    }
     try {
       final XFile video = await _controller!.stopVideoRecording();
       setState(() => _isRecording = false);
@@ -171,17 +235,22 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
 
   void _switchCamera() async {
     if (_cameras.isEmpty) return;
-    
+
     // Briefly hide the CameraPreview widget so the old texture gets destroyed
     if (mounted) setState(() => _isCameraInitialized = false);
-    
+
     _selectedCameraIndex = (_selectedCameraIndex + 1) % _cameras.length;
     await _initCamera(_cameras[_selectedCameraIndex]);
   }
 
   void _toggleFlash() async {
     if (_controller == null || !_controller!.value.isInitialized) return;
-    final modes = [FlashMode.off, FlashMode.auto, FlashMode.always, FlashMode.torch];
+    final modes = [
+      FlashMode.off,
+      FlashMode.auto,
+      FlashMode.always,
+      FlashMode.torch,
+    ];
     final currentIdx = modes.indexOf(_flashMode);
     final nextMode = modes[(currentIdx + 1) % modes.length];
     await _controller!.setFlashMode(nextMode);
@@ -284,7 +353,7 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
               child: CameraPreview(_controller!),
             ),
           ),
-          
+
           // Top Bar Overlay
           Positioned(
             top: MediaQuery.of(context).padding.top + 16,
@@ -331,7 +400,10 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                             height: 60,
                             decoration: BoxDecoration(
                               borderRadius: BorderRadius.circular(8),
-                              border: Border.all(color: Colors.white24, width: 1),
+                              border: Border.all(
+                                color: Colors.white24,
+                                width: 1,
+                              ),
                             ),
                             child: ClipRRect(
                               borderRadius: BorderRadius.circular(8),
@@ -367,7 +439,9 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                                   child: AssetEntityImage(
                                     _recentMedia.first,
                                     isOriginal: false,
-                                    thumbnailSize: const ThumbnailSize.square(150),
+                                    thumbnailSize: const ThumbnailSize.square(
+                                      150,
+                                    ),
                                     fit: BoxFit.cover,
                                   ),
                                 ),
@@ -397,8 +471,12 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                               width: _isRecording ? 30 : 66,
                               height: _isRecording ? 30 : 66,
                               decoration: BoxDecoration(
-                                shape: _isRecording ? BoxShape.rectangle : BoxShape.circle,
-                                borderRadius: _isRecording ? BorderRadius.circular(6) : null,
+                                shape: _isRecording
+                                    ? BoxShape.rectangle
+                                    : BoxShape.circle,
+                                borderRadius: _isRecording
+                                    ? BorderRadius.circular(6)
+                                    : null,
                                 color: _isRecording ? Colors.red : Colors.white,
                               ),
                             ),
@@ -409,12 +487,16 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
                       // Camera switch
                       IconButton(
                         onPressed: _switchCamera,
-                        icon: const Icon(Icons.flip_camera_ios, color: Colors.white, size: 36),
+                        icon: const Icon(
+                          Icons.flip_camera_ios,
+                          color: Colors.white,
+                          size: 36,
+                        ),
                       ),
                     ],
                   ),
                 ),
-                
+
                 // Instructions Text
                 const SizedBox(height: 16),
                 const Text(
@@ -429,4 +511,3 @@ class _CameraScreenState extends State<CameraScreen> with WidgetsBindingObserver
     );
   }
 }
-
