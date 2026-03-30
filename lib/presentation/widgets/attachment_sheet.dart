@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:photo_manager/photo_manager.dart';
+import 'package:permission_handler/permission_handler.dart';
+import '../../core/utils/permission_utils.dart';
 import '../../core/theme/app_theme.dart';
+
 import '../screens/camera_screen.dart';
 import '../screens/contact_picker_screen.dart';
 import '../screens/document_picker_screen.dart';
@@ -40,13 +43,15 @@ class _AttachmentSheet extends StatelessWidget {
   // ── Callbacks ──────────────────────────────────────────
 
   void _openGallery(BuildContext context) async {
+    // PhotoManager has its own complex permission handling, 
+    // but we can still use PermissionUtils for basic check if needed,
+    // or just rely on PhotoManager as it's already doing a good job.
+    // However, for consistency, let's use PermissionUtils for others.
     final PermissionState ps = await PhotoManager.requestPermissionExtend();
     if (ps.isAuth || ps.hasAccess) {
       if (!context.mounted) return;
-
-      // Close attachment sheet first
+      // ... rest of the code ...
       Navigator.pop(context);
-
       showModalBottomSheet(
         context: context,
         isScrollControlled: true,
@@ -72,46 +77,90 @@ class _AttachmentSheet extends StatelessWidget {
           );
         },
       );
+    } else {
+      final status = await Permission.photos.status;
+      if (status.isPermanentlyDenied && context.mounted) {
+        await PermissionUtils.requestPermission(
+          context,
+          Permission.photos,
+          title: 'Gallery Permission',
+          message: 'Gallery permission is required to select photos and videos. Please allow it in settings.',
+        );
+      }
+    }
+
+  }
+
+  void _openCamera(BuildContext context) async {
+    final granted = await PermissionUtils.requestPermission(
+      context,
+      Permission.camera,
+      title: 'Camera Permission',
+      message: 'Camera permission is required to take photos and videos. Please allow it in settings.',
+    );
+    if (granted && context.mounted) {
+      Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => CameraScreen(channelId: channelId)),
+      );
     }
   }
 
-  void _openCamera(BuildContext context) {
-    Navigator.pop(context); // Close attachment sheet
-    Navigator.push(
+  void _shareLocation(BuildContext context) async {
+    final granted = await PermissionUtils.requestPermission(
       context,
-      MaterialPageRoute(builder: (_) => CameraScreen(channelId: channelId)),
+      Permission.location,
+      title: 'Location Permission',
+      message: 'Location permission is required to share your location. Please allow it in settings.',
     );
+    if (granted && context.mounted) {
+      final navigator = Navigator.of(context);
+      navigator.pop();
+      navigator.push(
+        MaterialPageRoute(
+          builder: (_) => LocationShareScreen(channelId: channelId),
+        ),
+      );
+    }
   }
 
-  void _shareLocation(BuildContext context) {
-    final navigator = Navigator.of(context);
-    navigator.pop();
-    navigator.push(
-      MaterialPageRoute(
-        builder: (_) => LocationShareScreen(channelId: channelId),
-      ),
+  void _shareContact(BuildContext context) async {
+    final granted = await PermissionUtils.requestPermission(
+      context,
+      Permission.contacts,
+      title: 'Contacts Permission',
+      message: 'Contacts permission is required to share contacts. Please allow it in settings.',
     );
+    if (granted && context.mounted) {
+      Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => ContactPickerScreen(channelId: channelId),
+        ),
+      );
+    }
   }
 
-  void _shareContact(BuildContext context) {
-    Navigator.pop(context);
-    Navigator.push(
+  void _pickDocument(BuildContext context) async {
+    final granted = await PermissionUtils.requestPermission(
       context,
-      MaterialPageRoute(
-        builder: (_) => ContactPickerScreen(channelId: channelId),
-      ),
+      Permission.storage,
+      title: 'Storage Permission',
+      message: 'Storage permission is required to pick documents. Please allow it in settings.',
     );
+    if (granted && context.mounted) {
+      Navigator.pop(context);
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => DocumentPickerScreen(channelId: channelId),
+        ),
+      );
+    }
   }
 
-  void _pickDocument(BuildContext context) {
-    Navigator.pop(context);
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => DocumentPickerScreen(channelId: channelId),
-      ),
-    );
-  }
   void _pickAudio() => debugPrint('Pick Audio');
   void _createPoll() => debugPrint('Create Poll');
 

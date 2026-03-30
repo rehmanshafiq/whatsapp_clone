@@ -11,12 +11,14 @@ import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/permission_utils.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
 import '../screens/camera_screen.dart';
+
 
 class ChatInputBar extends StatefulWidget {
   final String channelId;
@@ -124,15 +126,6 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   Future<void> _initVoiceDir() async {
-    try {
-      if (!await Permission.microphone.isGranted) {
-        await Permission.microphone.request();
-      }
-    } catch (_) {
-      // permission_handler can throw during hot restart if a native-side
-      // request is still in flight. Safe to ignore — the recorder widget
-      // retries on its own when the user holds the mic button.
-    }
     final dir = await getApplicationDocumentsDirectory();
     final voiceDir = Directory('${dir.path}/voice_notes');
     if (!voiceDir.existsSync()) {
@@ -588,19 +581,37 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               ),
               IconButton(
                 icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
-                onPressed: () => showAttachmentSheet(context, widget.channelId),
+                onPressed: () async {
+                  final granted = await PermissionUtils.requestPermission(
+                    context,
+                    Permission.storage, // Or photos/videos on Android 13+
+                    title: 'Storage Permission',
+                    message: 'Storage permission is required to attach files. Please allow it in settings.',
+                  );
+                  if (granted && context.mounted) {
+                    showAttachmentSheet(context, widget.channelId);
+                  }
+                },
               ),
               // Camera icon only visible when no text has been entered
               if (!_hasText)
                 IconButton(
                   icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
-                  onPressed: () {
-                    Navigator.push(
+                  onPressed: () async {
+                    final granted = await PermissionUtils.requestPermission(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => CameraScreen(channelId: widget.channelId),
-                      ),
+                      Permission.camera,
+                      title: 'Camera Permission',
+                      message: 'Camera permission is required to take photos and videos. Please allow it in settings.',
                     );
+                    if (granted && context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CameraScreen(channelId: widget.channelId),
+                        ),
+                      );
+                    }
                   },
                 ),
             ],
