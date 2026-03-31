@@ -11,12 +11,14 @@ import 'package:social_media_recorder/screen/social_media_recorder.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/theme/app_theme.dart';
+import '../../core/utils/permission_utils.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import 'attachment_sheet.dart';
 import 'gif_picker_widget.dart';
 import 'sticker_picker_widget.dart';
 import '../screens/camera_screen.dart';
+
 
 class ChatInputBar extends StatefulWidget {
   final String channelId;
@@ -52,15 +54,22 @@ class ChatInputBar extends StatefulWidget {
   State<ChatInputBar> createState() => _ChatInputBarState();
 }
 
-class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderStateMixin {
+class _ChatInputBarState extends State<ChatInputBar>
+    with SingleTickerProviderStateMixin {
   final _controller = TextEditingController();
   final _textFocusNode = FocusNode();
 
   bool _hasText = false;
   bool _isEmojiVisible = false;
+
+  /// True only after microphone permission has been granted AND the user
+  /// has long-pressed to activate the recorder widget.
+  bool _isRecorderActive = false;
+
   String? _voiceNoteDir;
   late final TabController _tabController;
-  /// Throttle: re-send typing_start every 2s while typing to reset server 4s TTL.
+
+  /// Throttle: re-send typing_start every 2 s while typing to reset server TTL.
   Timer? _typingThrottleTimer;
   bool _typingSent = false;
 
@@ -89,11 +98,21 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
   }
 
+  @override
+  void dispose() {
+    widget.onTypingStop?.call();
+    widget.onRecordingStop?.call();
+    _typingThrottleTimer?.cancel();
+    _controller.removeListener(_onTextChanged);
+    _tabController.dispose();
+    _controller.dispose();
+    _textFocusNode.dispose();
+    super.dispose();
+  }
+
   void _onTextChanged() {
     final has = _controller.text.trim().isNotEmpty;
     if (has != _hasText) {
-      // Update _hasText WITHOUT disturbing focus. The TextField widget stays
-      // in the tree at all times (stable layout), so the keyboard never closes.
       setState(() => _hasText = has);
     }
     if (has) {
@@ -110,7 +129,8 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
   }
 
-  /// Re-send typing_start every 2s while user types to reset server 4s TTL.
+  /// Re-send typing_start every 2 s while the user types to reset the
+  /// server's 4 s TTL.
   void _scheduleTypingRefresh() {
     _typingThrottleTimer?.cancel();
     if (!mounted || _controller.text.trim().isEmpty) return;
@@ -123,16 +143,19 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     });
   }
 
+  void _send() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) return;
+    widget.onSend(text);
+    _controller.clear();
+    widget.onTypingStop?.call();
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Voice-note helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   Future<void> _initVoiceDir() async {
-    try {
-      if (!await Permission.microphone.isGranted) {
-        await Permission.microphone.request();
-      }
-    } catch (_) {
-      // permission_handler can throw during hot restart if a native-side
-      // request is still in flight. Safe to ignore — the recorder widget
-      // retries on its own when the user holds the mic button.
-    }
     final dir = await getApplicationDocumentsDirectory();
     final voiceDir = Directory('${dir.path}/voice_notes');
     if (!voiceDir.existsSync()) {
@@ -141,26 +164,6 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     if (mounted) {
       setState(() => _voiceNoteDir = voiceDir.path);
     }
-  }
-
-  @override
-  void dispose() {
-    widget.onTypingStop?.call();
-    widget.onRecordingStop?.call();
-    _typingThrottleTimer?.cancel();
-    _controller.removeListener(_onTextChanged);
-    _tabController.dispose();
-    _controller.dispose();
-    _textFocusNode.dispose();
-    super.dispose();
-  }
-
-  void _send() {
-    final text = _controller.text.trim();
-    if (text.isEmpty) return;
-    widget.onSend(text);
-    _controller.clear();
-    widget.onTypingStop?.call();
   }
 
   Duration _parseRecordingTime(String time) {
@@ -174,7 +177,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
   }
 
   /// The recorder produces filenames with colons from timestamps
-  /// (e.g. `22026-03-03-14:12.m4a`). Android's MediaPlayer rejects colons
+  /// (e.g. `2026-03-03-14:12.m4a`). Android's MediaPlayer rejects colons
   /// in file paths. Copy to a safely named file in app-documents.
   Future<File?> _ensureSafePath(File source) async {
     if (!source.existsSync() || source.lengthSync() == 0) return null;
@@ -198,6 +201,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
 
   Future<void> _handleAudioSend(File soundFile, String time) async {
     widget.onRecordingStop?.call();
+
     final duration = _parseRecordingTime(time);
     if (duration.inSeconds < 1) {
       try {
@@ -206,7 +210,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
       return;
     }
 
-    // Small delay to ensure the recorder has flushed the file
+    // Small delay to ensure the recorder has fully flushed the file to disk.
     await Future.delayed(const Duration(milliseconds: 300));
 
     final safeFile = await _ensureSafePath(soundFile);
@@ -215,17 +219,58 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Permission helper — REQUEST and only activate recorder when granted
+  // ─────────────────────────────────────────────────────────────────────────
+
+  /// Called when the user long-presses the placeholder mic button.
+  ///
+  /// Key fix: we call [Permission.microphone.request()] (not just .status)
+  /// so the OS permission dialog is actually shown on the first press.
+  /// We only set [_isRecorderActive] = true when the result is [isGranted].
+  Future<void> _requestMicAndActivate() async {
+    // request() shows the OS dialog on first call; returns cached result after.
+    final status = await Permission.microphone.request();
+    if (!mounted) return;
+
+    if (status.isGranted) {
+      // ✅ Permission granted — swap in the real SocialMediaRecorder widget.
+      setState(() => _isRecorderActive = true);
+    } else if (status.isPermanentlyDenied) {
+      // User tapped "Never ask again" — guide them to Settings.
+      if (context.mounted) {
+        await PermissionUtils.requestPermission(
+          context,
+          Permission.microphone,
+          title: 'Microphone Permission',
+          message:
+          'Microphone permission is required to record voice notes. '
+              'Please allow it in Settings.',
+        );
+      }
+    }
+    // status.isDenied → user tapped "Deny" on the OS dialog.
+    // Do nothing; they can long-press again to be prompted once more
+    // (Android allows re-prompting until they choose "Never ask again").
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Emoji picker
+  // ─────────────────────────────────────────────────────────────────────────
+
   void _toggleEmojiPicker() {
     if (_isEmojiVisible) {
-      // Switching from emoji → keyboard: hide emoji panel, open keyboard
       setState(() => _isEmojiVisible = false);
       _textFocusNode.requestFocus();
     } else {
-      // Switching from keyboard → emoji: dismiss keyboard, show emoji panel
       _textFocusNode.unfocus();
       setState(() => _isEmojiVisible = true);
     }
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -234,14 +279,14 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Input bar — single stable layout, never swapped out
+          // Input bar — single stable layout, keyboard never closes.
           Container(
             color: AppColors.scaffold,
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             child: _buildInputRow(),
           ),
 
-          // Emoji picker panel
+          // Emoji / GIF / Sticker picker panel
           if (_isEmojiVisible)
             SizedBox(
               height: 320,
@@ -269,10 +314,12 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
                       children: [
                         _buildEmojiPicker(),
                         GifPickerWidget(
-                          onGifSelected: (url) => widget.onSendMedia(url, false),
+                          onGifSelected: (url) =>
+                              widget.onSendMedia(url, false),
                         ),
                         StickerPickerWidget(
-                          onStickerSelected: (url) => widget.onSendMedia(url, true),
+                          onStickerSelected: (url) =>
+                              widget.onSendMedia(url, true),
                         ),
                       ],
                     ),
@@ -285,6 +332,10 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Reply preview
+  // ─────────────────────────────────────────────────────────────────────────
+
   Widget _buildReplyPreview(Message replyingTo) {
     final cubit = context.read<ChatCubit>();
     final myBackendId = cubit.repository.getCurrentUserId();
@@ -292,9 +343,10 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     final isMe = replyingTo.isOutgoing ||
         sid == AppConstants.currentUserId ||
         (myBackendId != null && myBackendId.isNotEmpty && sid == myBackendId);
-    final replySender = isMe
-        ? 'You'
-        : (cubit.state.selectedChannel?.name ?? sid);
+
+    final replySender =
+    isMe ? 'You' : (cubit.state.selectedChannel?.name ?? sid);
+
     String replyText = replyingTo.text.trim();
     if (replyText.isEmpty) {
       if (replyingTo.isImage) {
@@ -325,6 +377,7 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // Coloured left bar
             Container(
               width: 4,
               decoration: const BoxDecoration(
@@ -371,11 +424,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               child: Padding(
                 padding: const EdgeInsets.only(top: 2, right: 2),
                 child: IconButton(
-                  icon: const Icon(Icons.close, color: AppColors.iconMuted, size: 18),
+                  icon: const Icon(Icons.close,
+                      color: AppColors.iconMuted, size: 18),
                   onPressed: widget.onCancelReply,
                   splashRadius: 18,
                   padding: EdgeInsets.zero,
-                  constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
+                  constraints:
+                  const BoxConstraints(minWidth: 32, minHeight: 32),
                 ),
               ),
             ),
@@ -385,17 +440,19 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Input row (Stack layout so recorder can expand freely)
+  // ─────────────────────────────────────────────────────────────────────────
+
   /// Single stable layout.
   ///
   /// The TextField is ALWAYS in the tree (keyboard never closes).
   /// When text is present the send button replaces the mic at the trailing end.
   ///
-  /// The recorder is placed in a Stack that sits on top of the whole row so
-  /// that when the user holds the mic and the recorder widget expands to full
-  /// width it can do so freely — it is NOT constrained inside the Row next to
-  /// the TextField, which would cause a RenderFlex overflow.
+  /// The recorder sits in a Stack so that when the user holds the mic and the
+  /// recorder widget expands to full width, it can do so freely — it is NOT
+  /// constrained inside the Row next to the TextField.
   Widget _buildInputRow() {
-    // Total right-side button width: 6 gap + 48 button = 54 px
     const double trailingWidth = 54.0;
 
     return Stack(
@@ -409,23 +466,32 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
           ],
         ),
 
-        // ── Top layer: send button OR recorder ────────────────────────────
-        // The recorder sits here so it can expand leftward over the text field
-        // during recording without fighting Row layout constraints.
+        // ── Top layer: send button OR recorder ──────────────────────────────
         if (_hasText)
           Padding(
             padding: const EdgeInsets.only(left: 6),
             child: _CircleButton(icon: Icons.send, onPressed: _send),
           )
         else if (_voiceNoteDir != null)
-          SocialMediaRecorder(
+          _isRecorderActive
+          // ── Real recorder (permission already granted) ──────────────
+              ? SocialMediaRecorder(
             sendRequestFunction: (File soundFile, String time) {
               _handleAudioSend(soundFile, time);
             },
-            startRecording: () {
+            startRecording: () async {
               widget.onTypingStop?.call();
               widget.onRecordingStart?.call();
+
+              // Guard: if permission was revoked after the widget was
+              // activated, reset to the placeholder mic so the user goes
+              // through the proper request flow again.
+              final status = await Permission.microphone.status;
+              if (!status.isGranted && mounted) {
+                setState(() => _isRecorderActive = false);
+              }
             },
+
             stopRecording: (_) {
               widget.onRecordingStop?.call();
             },
@@ -471,7 +537,13 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
             ),
             radius: BorderRadius.circular(24),
           )
+          // ── Placeholder mic (permission not yet granted / checked) ──
+              : GestureDetector(
+            onLongPressStart: (_) => _requestMicAndActivate(),
+            child: const _CircleButton(icon: Icons.mic),
+          )
         else
+        // _voiceNoteDir still loading — show non-interactive mic
           const _CircleButton(icon: Icons.mic),
       ],
     );
@@ -588,19 +660,33 @@ class _ChatInputBarState extends State<ChatInputBar> with SingleTickerProviderSt
               ),
               IconButton(
                 icon: const Icon(Icons.attach_file, color: AppColors.iconMuted),
-                onPressed: () => showAttachmentSheet(context, widget.channelId),
+                onPressed: () async {
+                  final granted = await PermissionUtils.requestStoragePermission(context);
+                  if (granted && context.mounted) {
+                    showAttachmentSheet(context, widget.channelId);
+                  }
+                },
               ),
+
               // Camera icon only visible when no text has been entered
               if (!_hasText)
                 IconButton(
                   icon: const Icon(Icons.camera_alt, color: AppColors.iconMuted),
-                  onPressed: () {
-                    Navigator.push(
+                  onPressed: () async {
+                    final granted = await PermissionUtils.requestPermission(
                       context,
-                      MaterialPageRoute(
-                        builder: (_) => CameraScreen(channelId: widget.channelId),
-                      ),
+                      Permission.camera,
+                      title: 'Camera Permission',
+                      message: 'Camera permission is required to take photos and videos. Please allow it in settings.',
                     );
+                    if (granted && context.mounted) {
+                      Navigator.push(
+                        context,
+                        MaterialPageRoute(
+                          builder: (_) => CameraScreen(channelId: widget.channelId),
+                        ),
+                      );
+                    }
                   },
                 ),
             ],

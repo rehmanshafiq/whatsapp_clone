@@ -20,7 +20,6 @@ class AudioMessageBubble extends StatefulWidget {
   final Message message;
 
   /// Auth headers (Bearer + x-api-key) for downloading protected audio files.
-  /// Pass `context.read<ChatCubit>().authHeadersForMedia` from the parent.
   final Map<String, String>? authHeaders;
 
   const AudioMessageBubble({
@@ -38,9 +37,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
   final AudioPlaybackService _playbackService = getIt<AudioPlaybackService>();
   bool _isPlaying = false;
 
-  /// True as soon as this message is selected in the playback service —
-  /// before playback actually starts (remote audio may still be buffering).
-  /// Enables waveform seeking immediately on tap.
+  /// True as soon as this message is selected in the playback service.
   bool _isActive = false;
 
   Duration _position = Duration.zero;
@@ -83,9 +80,6 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
       final isThis = id == widget.message.id;
       final playing = isThis && _playbackService.isPlaying;
 
-      // Rebuild whenever either flag changes. _isActive flips true the moment
-      // the user taps play — before playback actually starts — so seek
-      // gestures attach immediately, even for remote/buffering audio.
       if (isThis != _isActive || playing != _isPlaying) {
         setState(() {
           _isActive = isThis;
@@ -139,47 +133,88 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     super.dispose();
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Playback
+  // ─────────────────────────────────────────────────────────────────────────
+
   void _togglePlayback() => unawaited(_togglePlaybackInternal());
 
   Future<void> _togglePlaybackInternal() async {
-    final path = widget.message.audioPath ?? widget.message.mediaUrl;
-    if (path == null) return;
+    // ── Path resolution priority (FIX) ────────────────────────────────────
+    //
+    // After upload the local file is deleted / no longer reliable.
+    // Always prefer the server mediaUrl; only fall back to the local
+    // audioPath when no server URL is available yet (e.g. optimistic UI
+    // before the upload response arrives).
+    //
+    // Old code:  audioPath ?? mediaUrl   ← picks the deleted local file first
+    // New code:  mediaUrl  ?? audioPath  ← picks the permanent server URL first
+    String? rawPath = widget.message.mediaUrl ?? widget.message.audioPath;
+    if (rawPath == null) return;
 
     // Resolve server-relative paths to full URLs.
-    final resolvedPath = path.startsWith('/uploads/')
-        ? '${AppConstants.apiBaseUrl}$path'
-        : path;
+    if (rawPath.startsWith('/uploads/')) {
+      rawPath = '${AppConstants.apiBaseUrl}$rawPath';
+    }
 
-    final playablePath = await _resolvePlayablePath(resolvedPath);
+    // If we ended up with a local path that no longer exists, try the
+    // server mediaUrl as a last-resort fallback before giving up.
+    if (!rawPath.startsWith('http')) {
+      final localFile = File(rawPath);
+      if (!localFile.existsSync() || localFile.lengthSync() == 0) {
+        final fallback = widget.message.mediaUrl;
+        if (fallback != null) {
+          rawPath = fallback.startsWith('/uploads/')
+              ? '${AppConstants.apiBaseUrl}$fallback'
+              : fallback;
+        } else {
+          debugPrint(
+            'AudioMessageBubble: local file missing and no mediaUrl for ${widget.message.id}',
+          );
+          return;
+        }
+      }
+    }
+
+    final playablePath = await _resolvePlayablePath(rawPath);
     if (playablePath == null) return;
 
     final streamHeaders =
-        playablePath.startsWith('http') ? widget.authHeaders : null;
+    playablePath.startsWith('http') ? widget.authHeaders : null;
+
     await _playbackService.play(
       widget.message.id,
       playablePath,
       headers: streamHeaders,
     );
+
     if (_totalDuration <= Duration.zero) {
       unawaited(_syncDurationFromPlayer());
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Remote-file download / cache
+  // ─────────────────────────────────────────────────────────────────────────
+
   /// Downloads remote audio to a correctly-named temp file using auth headers.
   /// Falls back to direct URL streaming if download fails.
   Future<String?> _resolvePlayablePath(String resolvedPath) async {
-    // Local file — just verify it exists.
+    // Local file — verify it exists and is non-empty.
     if (!resolvedPath.startsWith('http')) {
-      return File(resolvedPath).existsSync() ? resolvedPath : null;
+      final f = File(resolvedPath);
+      return (f.existsSync() && f.lengthSync() > 0) ? resolvedPath : null;
     }
 
     // Return cached local copy if still valid.
     final cachedPath = _cachedRemoteFilePath;
-    if (cachedPath != null && File(cachedPath).existsSync()) {
-      return cachedPath;
+    if (cachedPath != null) {
+      final cached = File(cachedPath);
+      if (cached.existsSync() && cached.lengthSync() > 0) return cachedPath;
+      _cachedRemoteFilePath = null; // stale cache — re-download
     }
 
-    // Another download is already running — stream directly in the meantime.
+    // Another download is already in-flight — stream directly in the meantime.
     if (_isPreparingRemoteAudio) return resolvedPath;
 
     _isPreparingRemoteAudio = true;
@@ -187,10 +222,6 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
       final uri = Uri.tryParse(resolvedPath);
       if (uri == null) return resolvedPath;
 
-      // ── Correct file extension ────────────────────────────────────────────
-      // Must derive extension from the *source URL* so .webm files are saved
-      // as .webm — not silently renamed to .m4a — so Android decoders can
-      // reliably parse and seek voice notes produced by web clients.
       final ext = _inferAudioExtension(uri.path);
 
       final tempDir = await getTemporaryDirectory();
@@ -201,11 +232,6 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
         final client = HttpClient();
         try {
           final request = await client.getUrl(uri);
-
-          // ── Auth headers ──────────────────────────────────────────────────
-          // /uploads/ files are protected. Without Bearer + x-api-key the
-          // server returns 401, the download fails silently, and the player
-          // either can't open the file or tries to stream without auth.
           widget.authHeaders?.forEach((key, value) {
             request.headers.set(key, value);
           });
@@ -240,18 +266,21 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
   }
 
   /// Returns the correct extension for [sourcePath].
-  /// Handles all formats the backend may produce, including .webm (Chrome/Opus).
   String _inferAudioExtension(String sourcePath) {
     final lower = sourcePath.toLowerCase();
     if (lower.endsWith('.m4a'))  return '.m4a';
     if (lower.endsWith('.aac'))  return '.aac';
     if (lower.endsWith('.mp3'))  return '.mp3';
     if (lower.endsWith('.wav'))  return '.wav';
-    if (lower.endsWith('.webm')) return '.webm'; // ← was missing
+    if (lower.endsWith('.webm')) return '.webm';
     if (lower.endsWith('.ogg') || lower.endsWith('.oga')) return '.ogg';
     if (lower.endsWith('.opus')) return '.opus';
     return '.m4a';
   }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Speed / seek
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _cycleSpeed() {
     final idx = _speeds.indexOf(_playbackSpeed);
@@ -267,8 +296,7 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     setState(() {
       _position = Duration(
         milliseconds:
-        (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds)
-            .round(),
+        (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds).round(),
       );
     });
   }
@@ -280,6 +308,20 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
   }
 
   void _onDragCancel() { if (_isActive) _isSeeking = false; }
+
+  void _onTapSeek(double fraction) {
+    if (!_isActive || _totalDuration.inMilliseconds <= 0) return;
+    final pos = Duration(
+      milliseconds:
+      (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds).round(),
+    );
+    setState(() => _position = pos);
+    _playbackService.seek(pos);
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Swipe-to-reply
+  // ─────────────────────────────────────────────────────────────────────────
 
   void _onSwipeDragUpdate(DragUpdateDetails d) {
     _swipeDragExtent =
@@ -313,21 +355,14 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     });
   }
 
-  void _onTapSeek(double fraction) {
-    if (!_isActive || _totalDuration.inMilliseconds <= 0) return;
-    final pos = Duration(
-      milliseconds:
-      (fraction.clamp(0.0, 1.0) * _totalDuration.inMilliseconds).round(),
-    );
-    setState(() => _position = pos);
-    _playbackService.seek(pos);
-  }
+  // ─────────────────────────────────────────────────────────────────────────
+  // Duration sync
+  // ─────────────────────────────────────────────────────────────────────────
 
   Future<void> _syncDurationFromPlayer() async {
     if (_isSyncingDuration) return;
     _isSyncingDuration = true;
     try {
-      // Remote audio can report duration late (after buffering/index parsing).
       for (var i = 0; i < 30; i++) {
         if (!mounted || !_isThisMessage) return;
         final dur = await _playbackService.getDuration();
@@ -343,9 +378,17 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
     }
   }
 
+  // ─────────────────────────────────────────────────────────────────────────
+  // Helpers
+  // ─────────────────────────────────────────────────────────────────────────
+
   String _formatDuration(Duration d) =>
       '${d.inMinutes.remainder(60).toString().padLeft(2, '0')}:'
           '${d.inSeconds.remainder(60).toString().padLeft(2, '0')}';
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Build
+  // ─────────────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
@@ -523,14 +566,20 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Sub-widgets
+// ─────────────────────────────────────────────────────────────────────────────
+
 class _PlayPauseButton extends StatelessWidget {
   final bool isPlaying;
   final VoidCallback onTap;
   final bool isOutgoing;
-  const _PlayPauseButton(
-      {required this.isPlaying,
-        required this.onTap,
-        required this.isOutgoing});
+
+  const _PlayPauseButton({
+    required this.isPlaying,
+    required this.onTap,
+    required this.isOutgoing,
+  });
 
   @override
   Widget build(BuildContext context) => GestureDetector(
@@ -561,8 +610,12 @@ class _SpeedButton extends StatelessWidget {
   final double speed;
   final VoidCallback onTap;
   final bool isOutgoing;
-  const _SpeedButton(
-      {required this.speed, required this.onTap, required this.isOutgoing});
+
+  const _SpeedButton({
+    required this.speed,
+    required this.onTap,
+    required this.isOutgoing,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -577,11 +630,14 @@ class _SpeedButton extends StatelessWidget {
               : AppColors.divider.withValues(alpha: 0.8),
           borderRadius: BorderRadius.circular(10),
         ),
-        child: Text(label,
-            style: const TextStyle(
-                color: AppColors.textPrimary,
-                fontSize: 10,
-                fontWeight: FontWeight.w600)),
+        child: Text(
+          label,
+          style: const TextStyle(
+            color: AppColors.textPrimary,
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
       ),
     );
   }
