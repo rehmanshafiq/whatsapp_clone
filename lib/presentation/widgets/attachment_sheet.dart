@@ -137,22 +137,17 @@ class _AttachmentSheet extends StatelessWidget {
     }
   }
 
-  void _pickDocument(BuildContext context) async {
-    final granted = await PermissionUtils.requestPermission(
+  void _pickDocument(BuildContext context) {
+    // File picker uses Android's Storage Access Framework, so no runtime
+    // storage permission is needed for selecting documents.
+    if (!context.mounted) return;
+    Navigator.pop(context);
+    Navigator.push(
       context,
-      Permission.storage,
-      title: 'Storage Permission',
-      message: 'Storage permission is required to pick documents. Please allow it in settings.',
+      MaterialPageRoute(
+        builder: (_) => DocumentPickerScreen(channelId: channelId),
+      ),
     );
-    if (granted && context.mounted) {
-      Navigator.pop(context);
-      Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => DocumentPickerScreen(channelId: channelId),
-        ),
-      );
-    }
   }
 
   void _pickAudio() => debugPrint('Pick Audio');
