@@ -966,6 +966,10 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
+        senderName: _stringFrom(data['sender_display_name']) ??
+            _stringFrom(data['sender_name']) ??
+            _stringFrom(data['display_name']) ??
+            _stringFrom(data['username']),
         text: messageText,
         timestamp: timestamp,
         status: MessageStatus.sent,

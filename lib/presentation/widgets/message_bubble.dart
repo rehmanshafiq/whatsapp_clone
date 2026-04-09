@@ -24,6 +24,22 @@ import 'message_status_icon.dart';
 import 'message_action_sheet.dart';
 import 'forwarded_label.dart';
 
+/// Consistent color per sender id for group chat sender labels.
+Color _senderNameColor(String senderId) {
+  const colors = [
+    Color(0xFF25D366), // WhatsApp green
+    Color(0xFF34B7F1), // Light blue
+    Color(0xFFE91E63), // Pink
+    Color(0xFFFF9800), // Orange
+    Color(0xFF9C27B0), // Purple
+    Color(0xFF00BCD4), // Cyan
+    Color(0xFFFFEB3B), // Yellow
+    Color(0xFF4CAF50), // Green
+  ];
+  final hash = senderId.hashCode.abs();
+  return colors[hash % colors.length];
+}
+
 /// Canonical body marker for soft-deleted messages.
 const String _deletedMessageMarker = 'message deleted';
 
@@ -395,6 +411,7 @@ class MessageBubble extends StatelessWidget {
   final VoidCallback? onReactionChanged;
   final VoidCallback? onReplyPreviewTap;
   final bool isFlashHighlighted;
+  final bool isGroupChat;
 
   const MessageBubble({
     super.key,
@@ -403,6 +420,7 @@ class MessageBubble extends StatelessWidget {
     this.onReactionChanged,
     this.onReplyPreviewTap,
     this.isFlashHighlighted = false,
+    this.isGroupChat = false,
   });
 
   @override
@@ -496,6 +514,18 @@ class MessageBubble extends StatelessWidget {
                 ? CrossAxisAlignment.end
                 : CrossAxisAlignment.start,
             children: [
+              if (isGroupChat && !message.isOutgoing && message.senderName != null && message.senderName!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(left: 12, bottom: 2),
+                  child: Text(
+                    message.senderName!,
+                    style: TextStyle(
+                      color: _senderNameColor(message.senderId),
+                      fontSize: 12.5,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
               bubble,
               if (message.reactions.isNotEmpty)
                 Padding(

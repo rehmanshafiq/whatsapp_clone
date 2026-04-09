@@ -91,6 +91,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
     return name[0].toUpperCase() + name.substring(1);
   }
 
+  String _displayName(String? name, {String fallback = 'Chat'}) {
+    if (name == null || name.trim().isEmpty) return fallback;
+    return _capitalizeName(name);
+  }
+
   // ------------------------------------------------------------------
   // Scroll handling
   // ------------------------------------------------------------------
@@ -621,9 +626,10 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 children: [
                   ChatAvatar(
                     imageUrl: channel?.avatarUrl,
-                    name: _capitalizeName(channel?.name ?? ''),
+                    name: _displayName(channel?.name),
                     radius: 18,
                     heroTag: 'avatar_${widget.channelId}',
+                    isGroup: channel?.isGroup ?? false,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -631,7 +637,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _capitalizeName(channel?.name ?? 'Chat'),
+                          _displayName(channel?.name),
                           style: const TextStyle(
                             color: AppColors.textPrimary,
                             fontSize: 16,
@@ -828,6 +834,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         isFlashHighlighted:
                                             _flashingMessageId == message.id &&
                                             _showFlashingOverlay,
+                                        isGroupChat: channel?.isGroup ?? false,
                                         onReplyPreviewTap:
                                             (message.replyToMessageId == null ||
                                                 message

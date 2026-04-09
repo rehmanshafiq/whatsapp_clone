@@ -756,6 +756,12 @@ class ChatRemoteDataSource {
         _asString(json['from_user_id']) ??
         _asString(json['senderId']) ??
         '';
+    final senderName =
+        _asString(json['sender_display_name']) ??
+        _asString(json['sender_name']) ??
+        _asString(json['senderName']) ??
+        _asString(json['display_name']) ??
+        _asString(json['username']);
     final text =
         _asString(json['text']) ??
         _asString(json['message']) ??
@@ -845,6 +851,7 @@ class ChatRemoteDataSource {
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
       senderId: senderId,
+      senderName: senderName,
       text: text,
       timestamp: ts,
       status: status,
@@ -1424,13 +1431,18 @@ class ChatRemoteDataSource {
       );
     }
 
+    final groupObj = json['group'] is Map<String, dynamic>
+        ? json['group'] as Map<String, dynamic>
+        : null;
     final name =
-        _asString(json['peer_display_name']) ??
-        _asString(json['name']) ??
-        _asString(json['title']) ??
-        _asString(json['display_name']) ??
-        _asString(otherUserMap?['display_name']) ??
-        _asString(otherUserMap?['username']) ??
+        _asNonEmptyString(json['peer_display_name']) ??
+        _asNonEmptyString(json['name']) ??
+        _asNonEmptyString(json['title']) ??
+        _asNonEmptyString(json['group_name']) ??
+        _asNonEmptyString(groupObj?['name']) ??
+        _asNonEmptyString(json['display_name']) ??
+        _asNonEmptyString(otherUserMap?['display_name']) ??
+        _asNonEmptyString(otherUserMap?['username']) ??
         'Unknown';
     final avatarUrl =
         _asString(json['peer_avatar_url']) ??
@@ -1504,6 +1516,13 @@ class ChatRemoteDataSource {
     if (value is String) return value;
     if (value is num || value is bool) return value.toString();
     return null;
+  }
+
+  /// Like [_asString] but returns null for empty/whitespace-only strings.
+  String? _asNonEmptyString(dynamic value) {
+    final s = _asString(value);
+    if (s == null || s.trim().isEmpty) return null;
+    return s;
   }
 
   int? _asInt(dynamic value) {
