@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../data/repository/auth_repository.dart';
 import '../../presentation/screens/chat_detail_screen.dart';
 import '../../presentation/screens/chat_list_screen.dart';
+import '../../presentation/screens/group_info_screen.dart';
 import '../../presentation/screens/select_contact_screen.dart';
 import '../../presentation/screens/responsive_shell.dart';
 import '../../presentation/screens/auth_screen.dart';
@@ -11,6 +12,7 @@ import '../../presentation/screens/auth_screen.dart';
 class AppRouter {
   static const String chats = 'chats';
   static const String chatDetail = 'chatDetail';
+  static const String groupInfo = 'groupInfo';
   static const String contacts = 'contacts';
   static const String auth = 'auth';
 
@@ -56,6 +58,18 @@ class AppRouter {
                       child: ChatDetailScreen(channelId: id),
                     );
                   },
+                  routes: [
+                    GoRoute(
+                      path: 'group/:groupId',
+                      name: groupInfo,
+                      pageBuilder: (context, state) {
+                        final groupId = state.pathParameters['groupId']!;
+                        return MaterialPage(
+                          child: GroupInfoScreen(groupId: groupId),
+                        );
+                      },
+                    ),
+                  ],
                 ),
               ],
             ),

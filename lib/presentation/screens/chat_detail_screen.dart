@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/di/service_locator.dart';
+import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
 import '../../data/models/message.dart';
@@ -602,7 +603,21 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 onPressed: () => context.pop(),
                 padding: EdgeInsets.zero,
               ),
-              title: Row(
+              title: GestureDetector(
+              onTap: () {
+                if (channel != null &&
+                    channel.isGroup &&
+                    channel.groupId != null) {
+                  context.goNamed(
+                    AppRouter.groupInfo,
+                    pathParameters: {
+                      'id': widget.channelId,
+                      'groupId': channel.groupId!,
+                    },
+                  );
+                }
+              },
+              child: Row(
                 children: [
                   ChatAvatar(
                     imageUrl: channel?.avatarUrl,
@@ -623,7 +638,15 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (state.isRecordingAudio)
+                        if (channel?.isGroup == true)
+                          Text(
+                            'tap here for group info',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          )
+                        else if (state.isRecordingAudio)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -667,6 +690,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 ],
               ),
+            ),
             ),
             body: Stack(
               children: [

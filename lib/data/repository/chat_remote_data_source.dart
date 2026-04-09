@@ -7,6 +7,8 @@ import 'package:dio/dio.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../models/chat_channel.dart';
+import '../models/group_details.dart';
+import '../models/group_member.dart';
 import '../models/message.dart';
 import '../models/message_status.dart';
 import '../models/user.dart';
@@ -382,6 +384,266 @@ class ChatRemoteDataSource {
     } catch (e) {
       throw ApiException(message: e.toString());
     }
+  }
+
+  Future<GroupDetails> getGroupDetails({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        return GroupDetails.fromJson(data);
+      }
+
+      throw const ApiException(
+        message: 'Invalid group details response from server.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to fetch group details.';
+
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (statusCode == 404) {
+        message = 'Group not found.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> updateGroup({
+    required String token,
+    required String groupId,
+    String? name,
+    String? description,
+    String? avatarUrl,
+  }) async {
+    try {
+      final data = <String, dynamic>{};
+      if (name != null) data['name'] = name;
+      if (description != null) data['description'] = description;
+      if (avatarUrl != null) data['avatar_url'] = avatarUrl;
+
+      final response = await _dio.put<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        data: data,
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic parsed = raw is String ? json.decode(raw) : raw;
+      if (parsed is Map<String, dynamic>) {
+        return GroupDetails.fromJson(parsed);
+      }
+      throw const ApiException(
+        message: 'Invalid update group response.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'update group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> deleteGroup({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'delete group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<GroupMember>> listGroupMembers({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/groups/$groupId/members',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is List) {
+        return data
+            .whereType<Map<String, dynamic>>()
+            .map(GroupMember.fromJson)
+            .toList();
+      }
+      return const [];
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'list members');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> addGroupMembers({
+    required String token,
+    required String groupId,
+    required List<String> userIds,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/groups/$groupId/members',
+        data: <String, dynamic>{'user_ids': userIds},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'add members');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> removeGroupMember({
+    required String token,
+    required String groupId,
+    required String userId,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/groups/$groupId/members/$userId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'remove member');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> updateMemberRole({
+    required String token,
+    required String groupId,
+    required String userId,
+    required String role,
+  }) async {
+    try {
+      await _dio.put<dynamic>(
+        '/api/v1/chat/groups/$groupId/members/$userId/role',
+        data: <String, dynamic>{'role': role},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'update member role');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> leaveGroup({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/groups/$groupId/leave',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'leave group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  ApiException _groupDioError(DioException e, String action) {
+    final statusCode = e.response?.statusCode;
+    String message = 'Failed to $action.';
+    if (statusCode == 401) {
+      message = 'Session expired. Please sign in again.';
+    } else if (statusCode == 403) {
+      message = 'You do not have permission to $action.';
+    } else if (statusCode == 404) {
+      message = 'Group not found.';
+    } else if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.receiveTimeout) {
+      message = 'Network error. Please check your connection and retry.';
+    }
+    return ApiException(message: message, statusCode: statusCode);
   }
 
   /// Paginated messages response: list plus next cursor / hasMore for older messages.
@@ -1196,6 +1458,12 @@ class ChatRemoteDataSource {
     final peerUserId =
         _asString(json['peer_user_id']) ?? _asString(otherUserMap?['id']);
 
+    final groupId = _asString(json['group_id']);
+    final isGroup =
+        _asBool(json['is_group']) ??
+        (json['type'] == 'group') ||
+        groupId != null;
+
     return ChatChannel(
       id: id,
       name: name,
@@ -1210,6 +1478,8 @@ class ChatRemoteDataSource {
           _asBool(json['isMuted']) ??
           _asBool(json['muted']) ??
           false,
+      isGroup: isGroup,
+      groupId: groupId,
     );
   }
 

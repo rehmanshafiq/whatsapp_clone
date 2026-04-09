@@ -5,6 +5,8 @@ import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../local/storage_service.dart';
 import '../models/chat_channel.dart';
+import '../models/group_details.dart';
+import '../models/group_member.dart';
 import '../models/message.dart';
 import '../models/message_status.dart';
 import '../models/user.dart';
@@ -1384,6 +1386,158 @@ class ChatRepository {
     } catch (e) {
       throw ApiException(message: e.toString());
     }
+  }
+
+  Future<GroupDetails> getGroupDetails(String groupId) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      return await _remoteDataSource.getGroupDetails(
+        token: token,
+        groupId: groupId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> updateGroup({
+    required String groupId,
+    String? name,
+    String? description,
+    String? avatarUrl,
+  }) async {
+    final token = _requireToken();
+    try {
+      return await _remoteDataSource.updateGroup(
+        token: token,
+        groupId: groupId,
+        name: name,
+        description: description,
+        avatarUrl: avatarUrl,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> deleteGroup(String groupId) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.deleteGroup(token: token, groupId: groupId);
+      final chats = _storageService.getChats();
+      chats.removeWhere((c) => c.groupId == groupId);
+      _storageService.saveChats(chats);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<GroupMember>> listGroupMembers(String groupId) async {
+    final token = _requireToken();
+    try {
+      return await _remoteDataSource.listGroupMembers(
+        token: token,
+        groupId: groupId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> addGroupMembers({
+    required String groupId,
+    required List<String> userIds,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.addGroupMembers(
+        token: token,
+        groupId: groupId,
+        userIds: userIds,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> removeGroupMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.removeGroupMember(
+        token: token,
+        groupId: groupId,
+        userId: userId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> updateMemberRole({
+    required String groupId,
+    required String userId,
+    required String role,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.updateMemberRole(
+        token: token,
+        groupId: groupId,
+        userId: userId,
+        role: role,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> leaveGroup(String groupId) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.leaveGroup(token: token, groupId: groupId);
+      final chats = _storageService.getChats();
+      chats.removeWhere((c) => c.groupId == groupId);
+      _storageService.saveChats(chats);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  String _requireToken() {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return token;
   }
 
   /// Opens a view-once message. Returns temporary image URL (valid 60 seconds).
