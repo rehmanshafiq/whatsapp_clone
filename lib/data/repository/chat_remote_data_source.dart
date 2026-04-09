@@ -325,6 +325,65 @@ class ChatRemoteDataSource {
     }
   }
 
+  Future<ChatChannel> createGroup({
+    required String token,
+    required String name,
+    String description = '',
+    String avatarUrl = '',
+    required List<String> memberIds,
+  }) async {
+    try {
+      final response = await _dio.post<dynamic>(
+        '/api/v1/chat/groups',
+        data: <String, dynamic>{
+          'name': name,
+          'description': description,
+          'avatar_url': avatarUrl,
+          'member_ids': memberIds,
+        },
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        return _mapConversationToChannel(data);
+      }
+      if (data is List &&
+          data.isNotEmpty &&
+          data.first is Map<String, dynamic>) {
+        return _mapConversationToChannel(data.first as Map<String, dynamic>);
+      }
+
+      throw const ApiException(
+        message: 'Invalid group response from server.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to create group.';
+
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   /// Paginated messages response: list plus next cursor / hasMore for older messages.
   static const int defaultMessagesLimit = 50;
 

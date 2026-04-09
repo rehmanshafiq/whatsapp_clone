@@ -1347,6 +1347,45 @@ class ChatRepository {
     }
   }
 
+  Future<ChatChannel> createGroup({
+    required String name,
+    String description = '',
+    String avatarUrl = '',
+    required List<String> memberIds,
+  }) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final channel = await _remoteDataSource.createGroup(
+        token: token,
+        name: name,
+        description: description,
+        avatarUrl: avatarUrl,
+        memberIds: memberIds,
+      );
+
+      final chats = _storageService.getChats();
+      final idx = chats.indexWhere((c) => c.id == channel.id);
+      if (idx >= 0) {
+        chats[idx] = channel;
+      } else {
+        chats.insert(0, channel);
+      }
+      _storageService.saveChats(chats);
+      return channel;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   /// Opens a view-once message. Returns temporary image URL (valid 60 seconds).
   Future<ViewOnceOpenResult> openViewOnceMessage(String messageId) async {
     final token = _storageService.getToken();
