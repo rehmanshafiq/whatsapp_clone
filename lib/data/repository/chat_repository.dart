@@ -319,19 +319,16 @@ class ChatRepository {
         isForwarded: isForwarded,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: '',
-          attachmentUrl: '',
-          replyToMessageId: replyToMessageId,
-          isForwarded: isForwarded,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: '',
+        attachmentUrl: '',
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+      );
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
       updateChannelLastMessage(channelId, text);
@@ -387,19 +384,15 @@ class ChatRepository {
         audioDuration: audioDuration,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          // Backend contract: "voice" for voice notes.
-          attachmentType: 'voice',
-          attachmentUrl: mediaUrl,
-          audioDuration: audioDuration,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'voice',
+        attachmentUrl: mediaUrl,
+        audioDuration: audioDuration,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -430,17 +423,14 @@ class ChatRepository {
         mediaUrl: mediaUrl,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          attachmentType: isSticker ? 'sticker' : 'gif',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: isSticker ? 'sticker' : 'gif',
+        attachmentUrl: mediaUrl,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -485,18 +475,15 @@ class ChatRepository {
         isViewOnce: isViewOnce,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'image',
-          attachmentUrl: mediaUrl,
-          isViewOnce: isViewOnce,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'image',
+        attachmentUrl: mediaUrl,
+        isViewOnce: isViewOnce,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -528,17 +515,14 @@ class ChatRepository {
         type: 'video',
       );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'video',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'video',
+        attachmentUrl: mediaUrl,
+      );
       final message = Message(
         id: clientMsgId,
         channelId: channelId,
@@ -669,18 +653,14 @@ class ChatRepository {
         documentFileSize: fileSize,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: message.id,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          // Keep body empty for file sends; renderer should use attachment fields.
-          body: '',
-          attachmentType: 'document',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: message.id,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'document',
+        attachmentUrl: mediaUrl,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -702,22 +682,18 @@ class ChatRepository {
       final attachmentType = _attachmentTypeForMessage(source);
       final attachmentUrl = source.mediaUrl ?? '';
       final body = source.text;
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: body,
-          attachmentType: attachmentType,
-          attachmentUrl: attachmentUrl,
-          audioDuration: source.isAudio ? source.audioDuration : null,
-          isViewOnce: source.isViewOnce,
-          replyToMessageId: source.replyToMessageId ?? '',
-          isForwarded: true,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: body,
+        attachmentType: attachmentType,
+        attachmentUrl: attachmentUrl,
+        audioDuration: source.isAudio ? source.audioDuration : null,
+        isViewOnce: source.isViewOnce,
+        replyToMessageId: source.replyToMessageId ?? '',
+        isForwarded: true,
+      );
 
       final message = Message(
         id: clientMsgId,
@@ -832,7 +808,7 @@ class ChatRepository {
   void sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
@@ -1558,7 +1534,7 @@ class ChatRepository {
   void _sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
@@ -1569,24 +1545,28 @@ class ChatRepository {
   }) {
     if (!_webSocketService.isConnected) return;
 
-    // Message envelope: event, data (object, never null), optional id, timestamp (Unix ms).
+    final data = <String, dynamic>{
+      'client_msg_id': clientMsgId,
+      'conversation_id': conversationId,
+      'body': body,
+      'attachment_type': attachmentType,
+      'attachment_url': attachmentUrl,
+      if (audioDuration != null) ...{
+        'audio_duration_ms': audioDuration.inMilliseconds,
+        'audio_duration': audioDuration.inSeconds,
+      },
+      'is_view_once': isViewOnce,
+      'reply_to_message_id': replyToMessageId,
+      'is_forwarded': isForwarded,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'send_message',
-      'data': <String, dynamic>{
-        'client_msg_id': clientMsgId,
-        'conversation_id': conversationId,
-        'peer_user_id': peerUserId,
-        'body': body,
-        'attachment_type': attachmentType,
-        'attachment_url': attachmentUrl,
-        if (audioDuration != null) ...{
-          'audio_duration_ms': audioDuration.inMilliseconds,
-          'audio_duration': audioDuration.inSeconds,
-        },
-        'is_view_once': isViewOnce,
-        'reply_to_message_id': replyToMessageId,
-        'is_forwarded': isForwarded,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 

@@ -1458,20 +1458,15 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          attachmentType: 'voice',
-          attachmentUrl: mediaUrl,
-          audioDuration: audioDuration,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'voice',
+        attachmentUrl: mediaUrl,
+        audioDuration: audioDuration,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: audioPath,
@@ -1569,20 +1564,15 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'image',
-          attachmentUrl: mediaUrl,
-          isViewOnce: isViewOnce,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'image',
+        attachmentUrl: mediaUrl,
+        isViewOnce: isViewOnce,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: imagePath,
@@ -1717,19 +1707,14 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'video',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'video',
+        attachmentUrl: mediaUrl,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: videoPath,
