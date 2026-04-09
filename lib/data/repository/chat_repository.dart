@@ -1758,19 +1758,24 @@ class ChatRepository {
   void sendReactToMessage({
     required String messageId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String emoji,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'emoji': emoji,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'react_to_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'emoji': emoji,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 

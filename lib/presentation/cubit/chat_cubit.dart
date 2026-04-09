@@ -2086,15 +2086,12 @@ class ChatCubit extends Cubit<ChatState> {
       emoji: nextEmoji,
     );
 
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      _repository.sendReactToMessage(
-        messageId: messageId,
-        conversationId: message.channelId,
-        emoji: nextEmoji,
-        peerUserId: peerUserId,
-      );
-    }
+    _repository.sendReactToMessage(
+      messageId: messageId,
+      conversationId: message.channelId,
+      emoji: nextEmoji,
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
   }
 
   void removeReaction(String messageId, String emoji) {
@@ -2113,15 +2110,12 @@ class ChatCubit extends Cubit<ChatState> {
       emoji: '',
     );
 
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      _repository.sendReactToMessage(
-        messageId: messageId,
-        conversationId: message.channelId,
-        emoji: '',
-        peerUserId: peerUserId,
-      );
-    }
+    _repository.sendReactToMessage(
+      messageId: messageId,
+      conversationId: message.channelId,
+      emoji: '',
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
   }
 
   String? _emojiForUser({
