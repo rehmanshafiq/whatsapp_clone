@@ -1062,7 +1062,9 @@ class ChatRemoteDataSource {
         );
       }
 
-      // Prepend base URL if the response URL is relative
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+      }
       final baseUrl = AppConstants.apiBaseUrl.replaceAll(RegExp(r'/$'), '');
       final path = url.startsWith('/') ? url : '/$url';
       return '$baseUrl$path';
