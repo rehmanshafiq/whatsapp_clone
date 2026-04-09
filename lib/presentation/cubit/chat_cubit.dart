@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/utils/document_attachment_filename.dart';
 import '../../data/models/chat_channel.dart';
 import '../../data/models/message.dart';
 import '../../data/models/message_status.dart';
@@ -954,6 +955,28 @@ class ChatCubit extends Cubit<ChatState> {
                 : null)
           : null;
 
+      // Document metadata — the API stores the filename in `body` for documents.
+      String? docFileName =
+          _stringFrom(data['file_name']) ??
+          _stringFrom(data['document_name']) ??
+          _stringFrom(data['attachment_name']) ??
+          _stringFrom(data['documentFileName']);
+      if (docFileName == null && resolvedType == MessageType.document) {
+        final bodyText = _stringFrom(data['body']) ??
+            _stringFrom(data['message']) ??
+            _stringFrom(data['text']);
+        if (bodyText != null && bodyText.contains('.')) {
+          docFileName = bodyText;
+        } else if (resolvedMediaUrl != null && resolvedMediaUrl.isNotEmpty) {
+          docFileName =
+              deriveDocumentFileNameFromAttachmentUrl(resolvedMediaUrl);
+        }
+      }
+      final docFileSize =
+          _intFrom(data['file_size']) ??
+          _intFrom(data['document_size']) ??
+          _intFrom(data['attachment_size']);
+
       final message = Message(
         id:
             (isOutgoing
@@ -978,6 +1001,8 @@ class ChatCubit extends Cubit<ChatState> {
         audioDuration: resolvedType == MessageType.audio
             ? _parseAudioDurationFromPayload(data)
             : null,
+        documentFileName: docFileName,
+        documentFileSize: docFileSize,
         isViewOnce: isViewOnce,
         viewOnceOpenedAt: viewOnceOpenedAt,
         replyToMessageId: replyToMessageId,
@@ -2332,6 +2357,14 @@ class ChatCubit extends Cubit<ChatState> {
     if (v == null) return null;
     if (v is String) return v.isEmpty ? null : v;
     return v.toString();
+  }
+
+  static int? _intFrom(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
   }
 
   static Duration? _parseAudioDurationFromPayload(Map<String, dynamic> data) {

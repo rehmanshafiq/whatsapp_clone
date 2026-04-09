@@ -6,6 +6,7 @@ import 'package:dio/dio.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/utils/document_attachment_filename.dart';
 import '../models/chat_channel.dart';
 import '../models/group_details.dart';
 import '../models/group_member.dart';
@@ -847,6 +848,27 @@ class ChatRemoteDataSource {
         _asString(json['replyToAttachmentType']);
     final isForwarded =
         json['is_forwarded'] == true || json['isForwarded'] == true;
+
+    // Document metadata — the API stores the filename in `body` for documents.
+    String? documentFileName =
+        _asString(json['file_name']) ??
+        _asString(json['document_name']) ??
+        _asString(json['attachment_name']) ??
+        _asString(json['documentFileName']);
+    if (documentFileName == null && type == MessageType.document) {
+      if (text.isNotEmpty && text.contains('.')) {
+        documentFileName = text;
+      } else if (attachmentUrl.isNotEmpty) {
+        documentFileName =
+            deriveDocumentFileNameFromAttachmentUrl(attachmentUrl);
+      }
+    }
+    final documentFileSize =
+        _asInt(json['file_size']) ??
+        _asInt(json['document_size']) ??
+        _asInt(json['attachment_size']) ??
+        _asInt(json['documentFileSize']);
+
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
@@ -858,6 +880,8 @@ class ChatRemoteDataSource {
       type: type,
       mediaUrl: attachmentUrl.isEmpty ? null : attachmentUrl,
       audioDuration: type == MessageType.audio ? audioDuration : null,
+      documentFileName: documentFileName,
+      documentFileSize: documentFileSize,
       deliveredAt: deliveredAt,
       readAt: readAt,
       isEdited: isEdited,
