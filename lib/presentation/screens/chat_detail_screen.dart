@@ -601,9 +601,12 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               backgroundColor: AppColors.appBar,
               leadingWidth: 32,
               leading: IconButton(
-                icon: const Icon(
-                  Icons.arrow_back,
-                  color: AppColors.textPrimary,
+                icon: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14.0),
+                  child: const Icon(
+                    Icons.arrow_back,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 onPressed: () => context.pop(),
                 padding: EdgeInsets.zero,
