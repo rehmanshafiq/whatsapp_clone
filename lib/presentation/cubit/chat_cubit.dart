@@ -2201,16 +2201,13 @@ class ChatCubit extends Cubit<ChatState> {
   /// Deletes one of the current user's sent messages (soft delete).
   Future<void> deleteMessage(Message message) async {
     if (!message.isOutgoing) return;
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      final bucket = _bucketFromTimestamp(message.timestamp);
-      _repository.sendDeleteMessage(
-        messageId: message.id,
-        conversationId: message.channelId,
-        bucket: bucket,
-        peerUserId: peerUserId,
-      );
-    }
+    final bucket = _bucketFromTimestamp(message.timestamp);
+    _repository.sendDeleteMessage(
+      messageId: message.id,
+      conversationId: message.channelId,
+      bucket: bucket,
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
 
     final deleted = message.copyWith(
       text: 'message deleted',

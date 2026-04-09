@@ -1624,18 +1624,23 @@ class ChatRepository {
     required String messageId,
     required String conversationId,
     required String bucket,
-    required String peerUserId,
+    String? peerUserId,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'bucket': bucket,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'delete_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'bucket': bucket,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
@@ -1648,19 +1653,24 @@ class ChatRepository {
     required String conversationId,
     required String bucket,
     required String body,
-    required String peerUserId,
+    String? peerUserId,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'bucket': bucket,
+      'body': body,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'edit_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'bucket': bucket,
-        'body': body,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
