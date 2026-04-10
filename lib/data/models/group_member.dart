@@ -23,15 +23,27 @@ class GroupMember extends Equatable {
   bool get canManageMembers => isOwner || isAdmin;
 
   factory GroupMember.fromJson(Map<String, dynamic> json) {
+    final joinedRaw = json['joined_at'];
+    DateTime joinedAt;
+    if (joinedRaw is String && joinedRaw.isNotEmpty) {
+      joinedAt = DateTime.parse(joinedRaw);
+    } else {
+      joinedAt = DateTime.now();
+    }
+
+    final role = _str(json['role']);
     return GroupMember(
-      userId: json['user_id'] as String,
-      username: json['username'] as String? ?? '',
-      displayName: json['display_name'] as String? ?? '',
-      avatarUrl: json['avatar_url'] as String? ?? '',
-      role: json['role'] as String? ?? 'member',
-      joinedAt: DateTime.parse(json['joined_at'] as String),
+      userId: _str(json['user_id']),
+      username: _str(json['username']),
+      displayName: _str(json['display_name']),
+      avatarUrl: _str(json['avatar_url']),
+      role: role.isEmpty ? 'member' : role,
+      joinedAt: joinedAt,
     );
   }
+
+  static String _str(dynamic value) =>
+      value == null ? '' : value.toString();
 
   Map<String, dynamic> toJson() => {
         'user_id': userId,

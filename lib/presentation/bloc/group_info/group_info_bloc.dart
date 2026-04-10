@@ -74,7 +74,10 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
         description: event.description,
         avatarUrl: event.avatarUrl,
       );
-      emit(state.copyWith(groupDetails: updated, isUpdating: false));
+      final merged = state.groupDetails != null
+          ? updated.mergeMissingFrom(state.groupDetails!)
+          : updated;
+      emit(state.copyWith(groupDetails: merged, isUpdating: false));
     } on ApiException catch (e) {
       emit(state.copyWith(isUpdating: false, actionError: e.message));
     } catch (e) {
@@ -96,7 +99,10 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
         groupId: state.groupId,
         avatarUrl: url,
       );
-      emit(state.copyWith(groupDetails: updated, isUpdating: false));
+      final merged = state.groupDetails != null
+          ? updated.mergeMissingFrom(state.groupDetails!)
+          : updated;
+      emit(state.copyWith(groupDetails: merged, isUpdating: false));
     } on ApiException catch (e) {
       emit(state.copyWith(isUpdating: false, actionError: e.message));
     } catch (e) {

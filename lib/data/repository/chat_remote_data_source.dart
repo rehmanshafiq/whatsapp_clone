@@ -461,7 +461,13 @@ class ChatRemoteDataSource {
       final dynamic raw = response.data;
       final dynamic parsed = raw is String ? json.decode(raw) : raw;
       if (parsed is Map<String, dynamic>) {
-        return GroupDetails.fromJson(parsed);
+        // Backend often returns only `{ "status": "updated" }` — not a group payload.
+        final hasGroupIdentity = parsed['group_id'] != null ||
+            parsed['conversation_id'] != null;
+        if (hasGroupIdentity) {
+          return GroupDetails.fromJson(parsed);
+        }
+        return getGroupDetails(token: token, groupId: groupId);
       }
       throw const ApiException(
         message: 'Invalid update group response.',

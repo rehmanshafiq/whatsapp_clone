@@ -92,9 +92,11 @@ class _GroupInfoView extends StatelessWidget {
 void _showEditGroupDialog(BuildContext context, GroupInfoState state) {
   final details = state.groupDetails;
   if (details == null) return;
+  final bloc = context.read<GroupInfoBloc>();
   showDialog<void>(
     context: context,
     builder: (dialogCtx) => _EditGroupDialog(
+      bloc: bloc,
       initialName: details.name,
       initialDescription: details.description,
     ),
@@ -440,10 +442,12 @@ class _Body extends StatelessWidget {
 
 class _EditGroupDialog extends StatefulWidget {
   const _EditGroupDialog({
+    required this.bloc,
     required this.initialName,
     required this.initialDescription,
   });
 
+  final GroupInfoBloc bloc;
   final String initialName;
   final String initialDescription;
 
@@ -520,7 +524,7 @@ class _EditGroupDialogState extends State<_EditGroupDialog> {
             final desc = _descController.text.trim();
             if (name.isEmpty) return;
             Navigator.of(context).pop();
-            context.read<GroupInfoBloc>().add(UpdateGroup(
+            widget.bloc.add(UpdateGroup(
                   name: name,
                   description: desc,
                 ));
