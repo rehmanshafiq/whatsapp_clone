@@ -12,9 +12,10 @@ part 'group_info_state.dart';
 
 class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
   GroupInfoBloc(this._repository) : super(const GroupInfoState()) {
-    _currentUserId = AppConstants.currentUserId;
+    _syncCurrentUserId();
     on<LoadGroupInfo>(_onLoad);
     on<UpdateGroup>(_onUpdateGroup);
+    on<UpdateGroupAvatarFromFile>(_onUpdateGroupAvatarFromFile);
     on<DeleteGroupRequested>(_onDeleteGroup);
     on<AddMembersRequested>(_onAddMembers);
     on<RemoveMemberRequested>(_onRemoveMember);
@@ -25,12 +26,18 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
 
   final ChatRepository _repository;
 
+  void _syncCurrentUserId() {
+    _currentUserId =
+        _repository.getCurrentUserId() ?? AppConstants.currentUserId;
+  }
+
   // ── Load ─────────────────────────────────────────────────────────────
 
   Future<void> _onLoad(
     LoadGroupInfo event,
     Emitter<GroupInfoState> emit,
   ) async {
+    _syncCurrentUserId();
     emit(state.copyWith(
       groupId: event.groupId,
       isLoading: true,
@@ -66,6 +73,28 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
         name: event.name,
         description: event.description,
         avatarUrl: event.avatarUrl,
+      );
+      emit(state.copyWith(groupDetails: updated, isUpdating: false));
+    } on ApiException catch (e) {
+      emit(state.copyWith(isUpdating: false, actionError: e.message));
+    } catch (e) {
+      emit(state.copyWith(isUpdating: false, actionError: e.toString()));
+    }
+  }
+
+  Future<void> _onUpdateGroupAvatarFromFile(
+    UpdateGroupAvatarFromFile event,
+    Emitter<GroupInfoState> emit,
+  ) async {
+    emit(state.copyWith(isUpdating: true, clearActionError: true));
+    try {
+      final url = await _repository.uploadMedia(
+        filePath: event.filePath,
+        type: 'image',
+      );
+      final updated = await _repository.updateGroup(
+        groupId: state.groupId,
+        avatarUrl: url,
       );
       emit(state.copyWith(groupDetails: updated, isUpdating: false));
     } on ApiException catch (e) {

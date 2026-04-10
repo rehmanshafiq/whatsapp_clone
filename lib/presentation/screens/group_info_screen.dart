@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -53,27 +54,187 @@ class _GroupInfoView extends StatelessWidget {
             ));
         }
       },
-      child: Scaffold(
-        backgroundColor: AppColors.scaffold,
-        appBar: AppBar(
-          backgroundColor: AppColors.appBar,
-          leading: IconButton(
-            icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
-            onPressed: () => context.pop(),
-          ),
-          title: const Text(
-            'Group Info',
-            style: TextStyle(
-              color: AppColors.textPrimary,
-              fontSize: 18,
-              fontWeight: FontWeight.w600,
+      child: BlocBuilder<GroupInfoBloc, GroupInfoState>(
+        builder: (context, state) {
+          return Scaffold(
+            backgroundColor: AppColors.scaffold,
+            appBar: AppBar(
+              backgroundColor: AppColors.appBar,
+              leading: IconButton(
+                icon: const Icon(Icons.arrow_back, color: AppColors.textPrimary),
+                onPressed: () => context.pop(),
+              ),
+              title: const Text(
+                'Group Info',
+                style: TextStyle(
+                  color: AppColors.textPrimary,
+                  fontSize: 18,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              actions: [
+                if (state.canManageMembers && state.groupDetails != null)
+                  IconButton(
+                    tooltip: 'Edit group',
+                    icon: const Icon(Icons.edit, color: AppColors.accent),
+                    onPressed: () => _showEditGroupDialog(context, state),
+                  ),
+              ],
             ),
-          ),
-        ),
-        body: const _Body(),
+            body: const _Body(),
+          );
+        },
       ),
     );
   }
+}
+
+void _showEditGroupDialog(BuildContext context, GroupInfoState state) {
+  final details = state.groupDetails;
+  if (details == null) return;
+  showDialog<void>(
+    context: context,
+    builder: (dialogCtx) => _EditGroupDialog(
+      initialName: details.name,
+      initialDescription: details.description,
+    ),
+  );
+}
+
+void _showAddMembersDialog(BuildContext context) {
+  var input = '';
+  showDialog<void>(
+    context: context,
+    builder: (dialogCtx) {
+      return AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title: const Text('Add members',
+            style: TextStyle(color: AppColors.textPrimary)),
+        content: TextField(
+          autofocus: true,
+          style: const TextStyle(color: AppColors.textPrimary),
+          decoration: const InputDecoration(
+            hintText: 'Enter user IDs (comma-separated)',
+            hintStyle: TextStyle(color: AppColors.textSecondary),
+            enabledBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: AppColors.divider)),
+            focusedBorder: UnderlineInputBorder(
+                borderSide: BorderSide(color: AppColors.accent)),
+          ),
+          onChanged: (v) => input = v,
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop();
+              final ids = input
+                  .split(',')
+                  .map((s) => s.trim())
+                  .where((s) => s.isNotEmpty)
+                  .toList();
+              if (ids.isNotEmpty) {
+                context.read<GroupInfoBloc>().add(AddMembersRequested(ids));
+              }
+            },
+            child:
+                const Text('Add', style: TextStyle(color: AppColors.accent)),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+void _confirmAction(
+  BuildContext context, {
+  required String title,
+  required String message,
+  required String actionLabel,
+  required VoidCallback onConfirm,
+}) {
+  showDialog<void>(
+    context: context,
+    builder: (dialogCtx) {
+      return AlertDialog(
+        backgroundColor: AppColors.appBar,
+        title:
+            Text(title, style: const TextStyle(color: AppColors.textPrimary)),
+        content: Text(message,
+            style: const TextStyle(color: AppColors.textSecondary)),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogCtx).pop(),
+            child: const Text('Cancel',
+                style: TextStyle(color: AppColors.textSecondary)),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogCtx).pop();
+              onConfirm();
+            },
+            child: Text(actionLabel,
+                style: const TextStyle(color: Colors.redAccent)),
+          ),
+        ],
+      );
+    },
+  );
+}
+
+Future<void> _pickGroupPhoto(BuildContext context) async {
+  final result = await FilePicker.platform.pickFiles(
+    type: FileType.image,
+    allowMultiple: false,
+    withData: false,
+  );
+  if (result == null || result.files.isEmpty) return;
+  final path = result.files.single.path;
+  if (path == null || path.isEmpty) return;
+  if (!context.mounted) return;
+  context.read<GroupInfoBloc>().add(UpdateGroupAvatarFromFile(path));
+}
+
+void _showAvatarOptionsSheet(BuildContext context, GroupInfoState state) {
+  final hasAvatar =
+      (state.groupDetails?.avatarUrl ?? '').trim().isNotEmpty;
+  showModalBottomSheet<void>(
+    context: context,
+    backgroundColor: AppColors.appBar,
+    builder: (ctx) => SafeArea(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ListTile(
+            leading: const Icon(Icons.photo_library, color: AppColors.accent),
+            title: const Text('Choose from gallery',
+                style: TextStyle(color: AppColors.textPrimary)),
+            onTap: () async {
+              Navigator.pop(ctx);
+              await _pickGroupPhoto(context);
+            },
+          ),
+          if (hasAvatar)
+            ListTile(
+              leading:
+                  const Icon(Icons.delete_outline, color: Colors.redAccent),
+              title: const Text('Remove photo',
+                  style: TextStyle(color: Colors.redAccent)),
+              onTap: () {
+                Navigator.pop(ctx);
+                context.read<GroupInfoBloc>().add(
+                      const UpdateGroup(avatarUrl: ''),
+                    );
+              },
+            ),
+        ],
+      ),
+    ),
+  );
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -120,285 +281,253 @@ class _Body extends StatelessWidget {
         final details = state.groupDetails;
         if (details == null) return const SizedBox.shrink();
 
-        return ListView(
+        return Column(
           children: [
-            const SizedBox(height: 24),
-            // ── Group avatar + name + member count ──
-            _GroupHeader(
-              name: details.name,
-              avatarUrl: details.avatarUrl,
-              memberCount: state.members.length,
-            ),
-            const SizedBox(height: 24),
-            const Divider(color: AppColors.divider, height: 1),
-
-            // ── Description ──
-            if (details.description.isNotEmpty) ...[
-              Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Description',
-                      style: TextStyle(
-                        color: AppColors.textSecondary,
-                        fontSize: 13,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      details.description,
-                      style: const TextStyle(
-                        color: AppColors.textPrimary,
-                        fontSize: 15,
-                      ),
-                    ),
-                  ],
-                ),
+            if (state.isUpdating)
+              const LinearProgressIndicator(
+                minHeight: 2,
+                color: AppColors.accent,
+                backgroundColor: AppColors.divider,
               ),
-              const Divider(color: AppColors.divider, height: 1),
-            ],
-
-            // ── Edit group (admin/owner only) ──
-            if (state.canManageMembers) ...[
-              ListTile(
-                leading:
-                    const Icon(Icons.edit, color: AppColors.accent, size: 22),
-                title: const Text('Edit Group',
-                    style: TextStyle(color: AppColors.textPrimary)),
-                onTap: () => _showEditGroupDialog(context, state),
-              ),
-              const Divider(color: AppColors.divider, height: 1),
-            ],
-
-            // ── Members header + add button ──
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-              child: Row(
+            Expanded(
+              child: ListView(
                 children: [
-                  Text(
-                    'Members (${state.members.length})',
-                    style: const TextStyle(
-                      color: AppColors.textSecondary,
-                      fontSize: 14,
-                      fontWeight: FontWeight.w500,
+                  const SizedBox(height: 24),
+                  _GroupHeader(
+                    name: details.name,
+                    avatarUrl: details.avatarUrl,
+                    memberCount: state.members.length,
+                    canManage: state.canManageMembers,
+                    onAvatarTap: state.canManageMembers
+                        ? () => _showAvatarOptionsSheet(context, state)
+                        : null,
+                    onEditTap: state.canManageMembers
+                        ? () => _showEditGroupDialog(context, state)
+                        : null,
+                  ),
+                  const SizedBox(height: 24),
+                  const Divider(color: AppColors.divider, height: 1),
+
+                  if (state.canManageMembers ||
+                      details.description.isNotEmpty) ...[
+                    InkWell(
+                      onTap: state.canManageMembers
+                          ? () => _showEditGroupDialog(context, state)
+                          : null,
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Description',
+                              style: TextStyle(
+                                color: AppColors.textSecondary,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              details.description.isEmpty
+                                  ? 'Add group description'
+                                  : details.description,
+                              style: TextStyle(
+                                color: details.description.isEmpty &&
+                                        state.canManageMembers
+                                    ? AppColors.textSecondary
+                                    : AppColors.textPrimary,
+                                fontSize: 15,
+                                fontStyle: details.description.isEmpty &&
+                                        state.canManageMembers
+                                    ? FontStyle.italic
+                                    : FontStyle.normal,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const Divider(color: AppColors.divider, height: 1),
+                  ],
+
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    child: Text(
+                      'Members (${state.members.length})',
+                      style: const TextStyle(
+                        color: AppColors.textSecondary,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w500,
+                      ),
                     ),
                   ),
-                  const Spacer(),
+
                   if (state.canManageMembers)
-                    IconButton(
-                      icon: const Icon(Icons.person_add,
-                          color: AppColors.accent, size: 22),
-                      onPressed: () => _showAddMembersDialog(context),
+                    ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor:
+                            AppColors.accent.withValues(alpha: 0.15),
+                        child: const Icon(Icons.person_add,
+                            color: AppColors.accent, size: 22),
+                      ),
+                      title: const Text(
+                        'Add members',
+                        style: TextStyle(color: AppColors.textPrimary),
+                      ),
+                      subtitle: const Text(
+                        'Add participants by user ID',
+                        style: TextStyle(
+                            color: AppColors.textSecondary, fontSize: 13),
+                      ),
+                      onTap: () => _showAddMembersDialog(context),
                     ),
+
+                  ...state.members.map((member) => _MemberTile(
+                        member: member,
+                        youAreOwner: state.isOwner,
+                        youAreAdmin: state.isAdmin,
+                        currentUserId: state.currentUserId,
+                      )),
+
+                  const SizedBox(height: 16),
+                  const Divider(color: AppColors.divider, height: 1),
+
+                  _DangerAction(
+                    icon: Icons.exit_to_app,
+                    label: 'Leave Group',
+                    onTap: () => _confirmAction(
+                      context,
+                      title: 'Leave Group',
+                      message:
+                          'Are you sure you want to leave this group? You will no longer receive messages.',
+                      actionLabel: 'Leave',
+                      onConfirm: () => context
+                          .read<GroupInfoBloc>()
+                          .add(const LeaveGroupRequested()),
+                    ),
+                  ),
+
+                  if (state.isOwner)
+                    _DangerAction(
+                      icon: Icons.delete_forever,
+                      label: 'Delete Group',
+                      onTap: () => _confirmAction(
+                        context,
+                        title: 'Delete Group',
+                        message:
+                            'This will permanently delete the group and all its messages for everyone.',
+                        actionLabel: 'Delete',
+                        onConfirm: () => context
+                            .read<GroupInfoBloc>()
+                            .add(const DeleteGroupRequested()),
+                      ),
+                    ),
+                  const SizedBox(height: 32),
                 ],
               ),
             ),
-
-            // ── Member list ──
-            ...state.members.map((member) => _MemberTile(
-                  member: member,
-                  isOwner: state.isOwner,
-                  isAdmin: state.isAdmin,
-                  currentUserId: state.currentUserId,
-                )),
-
-            const SizedBox(height: 16),
-            const Divider(color: AppColors.divider, height: 1),
-
-            // ── Leave group ──
-            _DangerAction(
-              icon: Icons.exit_to_app,
-              label: 'Leave Group',
-              onTap: () => _confirmAction(
-                context,
-                title: 'Leave Group',
-                message:
-                    'Are you sure you want to leave this group? You will no longer receive messages.',
-                actionLabel: 'Leave',
-                onConfirm: () => context
-                    .read<GroupInfoBloc>()
-                    .add(const LeaveGroupRequested()),
-              ),
-            ),
-
-            // ── Delete group (owner only) ──
-            if (state.isOwner)
-              _DangerAction(
-                icon: Icons.delete_forever,
-                label: 'Delete Group',
-                onTap: () => _confirmAction(
-                  context,
-                  title: 'Delete Group',
-                  message:
-                      'This will permanently delete the group and all its messages for everyone.',
-                  actionLabel: 'Delete',
-                  onConfirm: () => context
-                      .read<GroupInfoBloc>()
-                      .add(const DeleteGroupRequested()),
-                ),
-              ),
-            const SizedBox(height: 32),
           ],
         );
       },
     );
   }
+}
 
-  void _showEditGroupDialog(BuildContext context, GroupInfoState state) {
-    final details = state.groupDetails!;
-    String name = details.name;
-    String description = details.description;
+// ─────────────────────────────────────────────────────────────────────────────
+// Edit group (name + description)
+// ─────────────────────────────────────────────────────────────────────────────
 
-    showDialog<void>(
-      context: context,
-      builder: (dialogCtx) {
-        return AlertDialog(
-          backgroundColor: AppColors.appBar,
-          title: const Text('Edit Group',
-              style: TextStyle(color: AppColors.textPrimary)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: TextEditingController(text: name),
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'Group name',
-                  labelStyle: TextStyle(color: AppColors.textSecondary),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.divider)),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.accent)),
-                ),
-                onChanged: (v) => name = v,
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: TextEditingController(text: description),
-                style: const TextStyle(color: AppColors.textPrimary),
-                decoration: const InputDecoration(
-                  labelText: 'Description',
-                  labelStyle: TextStyle(color: AppColors.textSecondary),
-                  enabledBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.divider)),
-                  focusedBorder: UnderlineInputBorder(
-                      borderSide: BorderSide(color: AppColors.accent)),
-                ),
-                maxLines: 3,
-                onChanged: (v) => description = v,
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogCtx).pop();
-                context.read<GroupInfoBloc>().add(UpdateGroup(
-                      name: name.trim().isNotEmpty ? name.trim() : null,
-                      description: description.trim(),
-                    ));
-              },
-              child: const Text('Save',
-                  style: TextStyle(color: AppColors.accent)),
-            ),
-          ],
-        );
-      },
-    );
+class _EditGroupDialog extends StatefulWidget {
+  const _EditGroupDialog({
+    required this.initialName,
+    required this.initialDescription,
+  });
+
+  final String initialName;
+  final String initialDescription;
+
+  @override
+  State<_EditGroupDialog> createState() => _EditGroupDialogState();
+}
+
+class _EditGroupDialogState extends State<_EditGroupDialog> {
+  late final TextEditingController _nameController;
+  late final TextEditingController _descController;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+    _descController = TextEditingController(text: widget.initialDescription);
   }
 
-  void _showAddMembersDialog(BuildContext context) {
-    String input = '';
-    showDialog<void>(
-      context: context,
-      builder: (dialogCtx) {
-        return AlertDialog(
-          backgroundColor: AppColors.appBar,
-          title: const Text('Add Members',
-              style: TextStyle(color: AppColors.textPrimary)),
-          content: TextField(
-            autofocus: true,
-            style: const TextStyle(color: AppColors.textPrimary),
-            decoration: const InputDecoration(
-              hintText: 'Enter user IDs (comma-separated)',
-              hintStyle: TextStyle(color: AppColors.textSecondary),
-              enabledBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.divider)),
-              focusedBorder: UnderlineInputBorder(
-                  borderSide: BorderSide(color: AppColors.accent)),
-            ),
-            onChanged: (v) => input = v,
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.textSecondary)),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogCtx).pop();
-                final ids = input
-                    .split(',')
-                    .map((s) => s.trim())
-                    .where((s) => s.isNotEmpty)
-                    .toList();
-                if (ids.isNotEmpty) {
-                  context
-                      .read<GroupInfoBloc>()
-                      .add(AddMembersRequested(ids));
-                }
-              },
-              child:
-                  const Text('Add', style: TextStyle(color: AppColors.accent)),
-            ),
-          ],
-        );
-      },
-    );
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _descController.dispose();
+    super.dispose();
   }
 
-  void _confirmAction(
-    BuildContext context, {
-    required String title,
-    required String message,
-    required String actionLabel,
-    required VoidCallback onConfirm,
-  }) {
-    showDialog<void>(
-      context: context,
-      builder: (dialogCtx) {
-        return AlertDialog(
-          backgroundColor: AppColors.appBar,
-          title:
-              Text(title, style: const TextStyle(color: AppColors.textPrimary)),
-          content: Text(message,
-              style: const TextStyle(color: AppColors.textSecondary)),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Cancel',
-                  style: TextStyle(color: AppColors.textSecondary)),
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.appBar,
+      title: const Text('Edit group',
+          style: TextStyle(color: AppColors.textPrimary)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _nameController,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(
+                labelText: 'Group name',
+                labelStyle: TextStyle(color: AppColors.textSecondary),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.divider)),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.accent)),
+              ),
             ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(dialogCtx).pop();
-                onConfirm();
-              },
-              child: Text(actionLabel,
-                  style: const TextStyle(color: Colors.redAccent)),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _descController,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(
+                labelText: 'Description',
+                labelStyle: TextStyle(color: AppColors.textSecondary),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.divider)),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.accent)),
+              ),
+              maxLines: 3,
             ),
           ],
-        );
-      },
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel',
+              style: TextStyle(color: AppColors.textSecondary)),
+        ),
+        TextButton(
+          onPressed: () {
+            final name = _nameController.text.trim();
+            final desc = _descController.text.trim();
+            if (name.isEmpty) return;
+            Navigator.of(context).pop();
+            context.read<GroupInfoBloc>().add(UpdateGroup(
+                  name: name,
+                  description: desc,
+                ));
+          },
+          child: const Text('Save', style: TextStyle(color: AppColors.accent)),
+        ),
+      ],
     );
   }
 }
@@ -412,36 +541,99 @@ class _GroupHeader extends StatelessWidget {
     required this.name,
     required this.avatarUrl,
     required this.memberCount,
+    required this.canManage,
+    this.onAvatarTap,
+    this.onEditTap,
   });
 
   final String name;
   final String avatarUrl;
   final int memberCount;
+  final bool canManage;
+  final VoidCallback? onAvatarTap;
+  final VoidCallback? onEditTap;
 
   @override
   Widget build(BuildContext context) {
-    return Column(
-      children: [
-        ChatAvatar(imageUrl: avatarUrl, name: name, radius: 48),
-        const SizedBox(height: 14),
-        Text(
-          name,
-          style: const TextStyle(
-            color: AppColors.textPrimary,
-            fontSize: 22,
-            fontWeight: FontWeight.w600,
+    final avatar = ChatAvatar(
+      imageUrl: avatarUrl,
+      name: name,
+      radius: 48,
+      isGroup: true,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 20),
+      child: Column(
+        children: [
+          Stack(
+            clipBehavior: Clip.none,
+            alignment: Alignment.center,
+            children: [
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: canManage ? onAvatarTap : null,
+                  customBorder: const CircleBorder(),
+                  child: avatar,
+                ),
+              ),
+              if (canManage)
+                Positioned(
+                  right: -4,
+                  bottom: -4,
+                  child: Material(
+                    color: AppColors.accent,
+                    shape: const CircleBorder(),
+                    child: InkWell(
+                      onTap: onAvatarTap,
+                      customBorder: const CircleBorder(),
+                      child: const Padding(
+                        padding: EdgeInsets.all(6),
+                        child: Icon(Icons.camera_alt,
+                            size: 16, color: AppColors.scaffold),
+                      ),
+                    ),
+                  ),
+                ),
+            ],
           ),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          '$memberCount member${memberCount == 1 ? '' : 's'}',
-          style: const TextStyle(
-            color: AppColors.textSecondary,
-            fontSize: 14,
+          const SizedBox(height: 14),
+          InkWell(
+            onTap: canManage ? onEditTap : null,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Flexible(
+                  child: Text(
+                    name,
+                    style: const TextStyle(
+                      color: AppColors.textPrimary,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ),
+                if (canManage) ...[
+                  const SizedBox(width: 8),
+                  const Icon(Icons.edit,
+                      size: 18, color: AppColors.textSecondary),
+                ],
+              ],
+            ),
           ),
-        ),
-      ],
+          const SizedBox(height: 4),
+          Text(
+            '$memberCount member${memberCount == 1 ? '' : 's'}',
+            style: const TextStyle(
+              color: AppColors.textSecondary,
+              fontSize: 14,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -453,19 +645,22 @@ class _GroupHeader extends StatelessWidget {
 class _MemberTile extends StatelessWidget {
   const _MemberTile({
     required this.member,
-    required this.isOwner,
-    required this.isAdmin,
+    required this.youAreOwner,
+    required this.youAreAdmin,
     required this.currentUserId,
   });
 
   final GroupMember member;
-  final bool isOwner;
-  final bool isAdmin;
+  final bool youAreOwner;
+  final bool youAreAdmin;
   final String currentUserId;
 
   @override
   Widget build(BuildContext context) {
     final isSelf = member.userId == currentUserId;
+    final showMenu = !isSelf &&
+        !member.isOwner &&
+        (youAreOwner || (youAreAdmin && member.isMember));
 
     return ListTile(
       leading: ChatAvatar(
@@ -513,29 +708,37 @@ class _MemberTile extends StatelessWidget {
         member.username,
         style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
       ),
-      trailing: (!isSelf && (isOwner || (isAdmin && member.isMember)))
+      trailing: showMenu
           ? PopupMenuButton<String>(
               icon: const Icon(Icons.more_vert, color: AppColors.iconMuted),
               color: AppColors.appBar,
-              onSelected: (action) =>
-                  _handleMemberAction(context, action),
-              itemBuilder: (_) => [
-                if (isOwner) ...[
-                  PopupMenuItem(
-                    value: member.isAdmin ? 'demote' : 'promote',
-                    child: Text(
-                      member.isAdmin ? 'Remove admin' : 'Make admin',
-                      style:
-                          const TextStyle(color: AppColors.textPrimary),
+              onSelected: (action) => _handleMemberAction(context, action),
+              itemBuilder: (ctx) {
+                final items = <PopupMenuEntry<String>>[];
+                if (youAreOwner) {
+                  items.add(
+                    PopupMenuItem(
+                      value: member.isAdmin ? 'demote' : 'promote',
+                      child: Text(
+                        member.isAdmin
+                            ? 'Dismiss as admin'
+                            : 'Make group admin',
+                        style: const TextStyle(color: AppColors.textPrimary),
+                      ),
                     ),
-                  ),
-                ],
-                const PopupMenuItem(
-                  value: 'remove',
-                  child: Text('Remove',
-                      style: TextStyle(color: Colors.redAccent)),
-                ),
-              ],
+                  );
+                }
+                if (youAreOwner || (youAreAdmin && member.isMember)) {
+                  items.add(
+                    const PopupMenuItem(
+                      value: 'remove',
+                      child: Text('Remove from group',
+                          style: TextStyle(color: Colors.redAccent)),
+                    ),
+                  );
+                }
+                return items;
+              },
             )
           : null,
     );
@@ -547,11 +750,14 @@ class _MemberTile extends StatelessWidget {
       case 'promote':
         bloc.add(UpdateMemberRoleRequested(
             userId: member.userId, role: 'admin'));
+        break;
       case 'demote':
         bloc.add(UpdateMemberRoleRequested(
             userId: member.userId, role: 'member'));
+        break;
       case 'remove':
         bloc.add(RemoveMemberRequested(member.userId));
+        break;
     }
   }
 }

@@ -33,7 +33,19 @@ final class GroupInfoState extends Equatable {
     }
   }
 
-  bool get isOwner => currentMember?.isOwner ?? false;
+  /// True if our row in the member list is owner/admin, or if [groupDetails.ownerId]
+  /// matches the logged-in user (covers API id vs placeholder "me" mismatches).
+  bool get isOwner {
+    if (currentMember?.isOwner == true) return true;
+    final d = groupDetails;
+    if (d != null &&
+        d.ownerId.isNotEmpty &&
+        d.ownerId == _currentUserId) {
+      return true;
+    }
+    return false;
+  }
+
   bool get isAdmin => currentMember?.isAdmin ?? false;
   bool get canManageMembers => isOwner || isAdmin;
 
@@ -79,5 +91,5 @@ final class GroupInfoState extends Equatable {
       ];
 }
 
-/// Set once from AppConstants at bloc creation time.
+/// Synced from [ChatRepository.getCurrentUserId] in [GroupInfoBloc] (not the placeholder `me`).
 String _currentUserId = '';
