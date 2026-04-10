@@ -114,8 +114,18 @@ class ChatRepository {
                 )
                 .toList();
 
-      _storageService.saveChats(filtered);
-      return filtered;
+      final previous = _storageService.getChats();
+      final merged = filtered.map((remote) {
+        if (!remote.isGroup || remote.avatarUrl.isNotEmpty) return remote;
+        final idx = previous.indexWhere((c) => c.id == remote.id);
+        if (idx < 0) return remote;
+        final prev = previous[idx];
+        if (prev.avatarUrl.isEmpty) return remote;
+        return remote.copyWith(avatarUrl: prev.avatarUrl);
+      }).toList();
+
+      _storageService.saveChats(merged);
+      return merged;
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -994,6 +1004,29 @@ class ChatRepository {
     // Re-sort to maintain order
     chats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     _storageService.saveChats(chats);
+  }
+
+  /// Updates stored group chat title/avatar so list + detail stay in sync after
+  /// group settings changes (local patch; next full [getChats] may replace from API).
+  void patchGroupChannelLocal({
+    required String groupId,
+    String? name,
+    String? avatarUrl,
+  }) {
+    if (name == null && avatarUrl == null) return;
+    final chats = _storageService.getChats();
+    var changed = false;
+    for (var i = 0; i < chats.length; i++) {
+      final c = chats[i];
+      if (c.groupId != groupId) continue;
+      final updated = c.copyWith(name: name, avatarUrl: avatarUrl);
+      if (updated == c) continue;
+      chats[i] = updated;
+      changed = true;
+    }
+    if (changed) {
+      _storageService.saveChats(chats);
+    }
   }
 
   void clearUnread(String channelId) {

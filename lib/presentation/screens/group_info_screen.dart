@@ -9,6 +9,7 @@ import '../../core/theme/app_theme.dart';
 import '../../data/models/group_member.dart';
 import '../../data/repository/chat_repository.dart';
 import '../bloc/group_info/group_info_bloc.dart';
+import '../cubit/chat_cubit.dart';
 import '../widgets/chat_avatar.dart';
 
 class GroupInfoScreen extends StatelessWidget {
@@ -54,9 +55,25 @@ class _GroupInfoView extends StatelessWidget {
             ));
         }
       },
-      child: BlocBuilder<GroupInfoBloc, GroupInfoState>(
-        builder: (context, state) {
-          return Scaffold(
+      child: BlocListener<GroupInfoBloc, GroupInfoState>(
+        listenWhen: (prev, curr) {
+          final cd = curr.groupDetails;
+          final pd = prev.groupDetails;
+          if (cd == null || pd == null) return false;
+          if (pd.groupId != cd.groupId) return false;
+          return cd.name != pd.name || cd.avatarUrl != pd.avatarUrl;
+        },
+        listener: (context, state) {
+          final d = state.groupDetails!;
+          context.read<ChatCubit>().applyGroupChannelPatch(
+                groupId: d.groupId,
+                name: d.name,
+                avatarUrl: d.avatarUrl,
+              );
+        },
+        child: BlocBuilder<GroupInfoBloc, GroupInfoState>(
+          builder: (context, state) {
+            return Scaffold(
             backgroundColor: AppColors.scaffold,
             appBar: AppBar(
               backgroundColor: AppColors.appBar,
@@ -83,7 +100,8 @@ class _GroupInfoView extends StatelessWidget {
             ),
             body: const _Body(),
           );
-        },
+          },
+        ),
       ),
     );
   }
@@ -239,12 +257,41 @@ void _showAvatarOptionsSheet(BuildContext context, GroupInfoState state) {
   );
 }
 
+List<GroupMember> _filterMembersLocal(
+  List<GroupMember> members,
+  String query,
+) {
+  final q = query.trim().toLowerCase();
+  if (q.isEmpty) return members;
+  return members
+      .where((m) {
+        final name = m.displayName.toLowerCase();
+        final user = m.username.toLowerCase();
+        final id = m.userId.toLowerCase();
+        return name.contains(q) || user.contains(q) || id.contains(q);
+      })
+      .toList();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Body
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _Body extends StatelessWidget {
+class _Body extends StatefulWidget {
   const _Body();
+
+  @override
+  State<_Body> createState() => _BodyState();
+}
+
+class _BodyState extends State<_Body> {
+  final TextEditingController _memberSearchController = TextEditingController();
+
+  @override
+  void dispose() {
+    _memberSearchController.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -354,13 +401,59 @@ class _Body extends StatelessWidget {
                   ],
 
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 4),
                     child: Text(
                       'Members (${state.members.length})',
                       style: const TextStyle(
                         color: AppColors.textSecondary,
                         fontSize: 14,
                         fontWeight: FontWeight.w500,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: TextField(
+                      controller: _memberSearchController,
+                      onChanged: (_) => setState(() {}),
+                      style: const TextStyle(
+                          color: AppColors.textPrimary, fontSize: 15),
+                      cursorColor: AppColors.accent,
+                      decoration: InputDecoration(
+                        isDense: true,
+                        hintText: 'Search members',
+                        hintStyle: const TextStyle(
+                            color: AppColors.textSecondary, fontSize: 15),
+                        prefixIcon: const Icon(Icons.search,
+                            color: AppColors.iconMuted, size: 22),
+                        suffixIcon: _memberSearchController.text.isNotEmpty
+                            ? IconButton(
+                                icon: const Icon(Icons.clear,
+                                    color: AppColors.iconMuted, size: 20),
+                                onPressed: () {
+                                  _memberSearchController.clear();
+                                  setState(() {});
+                                },
+                              )
+                            : null,
+                        filled: true,
+                        fillColor: AppColors.appBar,
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              const BorderSide(color: AppColors.divider),
+                        ),
+                        enabledBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide:
+                              const BorderSide(color: AppColors.divider),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                          borderSide: const BorderSide(color: AppColors.accent),
+                        ),
+                        contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 4, vertical: 10),
                       ),
                     ),
                   ),
@@ -385,12 +478,39 @@ class _Body extends StatelessWidget {
                       onTap: () => _showAddMembersDialog(context),
                     ),
 
-                  ...state.members.map((member) => _MemberTile(
-                        member: member,
-                        youAreOwner: state.isOwner,
-                        youAreAdmin: state.isAdmin,
-                        currentUserId: state.currentUserId,
-                      )),
+                  ...() {
+                    final filtered = _filterMembersLocal(
+                      state.members,
+                      _memberSearchController.text,
+                    );
+                    if (filtered.isEmpty &&
+                        _memberSearchController.text.trim().isNotEmpty) {
+                      return [
+                        Padding(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 24, vertical: 12),
+                          child: Text(
+                            'No members match your search',
+                            style: TextStyle(
+                              color: AppColors.textSecondary.withValues(
+                                  alpha: 0.9),
+                              fontSize: 14,
+                            ),
+                          ),
+                        ),
+                      ];
+                    }
+                    return filtered
+                        .map(
+                          (member) => _MemberTile(
+                            member: member,
+                            youAreOwner: state.isOwner,
+                            youAreAdmin: state.isAdmin,
+                            currentUserId: state.currentUserId,
+                          ),
+                        )
+                        .toList();
+                  }(),
 
                   const SizedBox(height: 16),
                   const Divider(color: AppColors.divider, height: 1),

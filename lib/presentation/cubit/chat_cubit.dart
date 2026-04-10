@@ -82,6 +82,31 @@ class ChatCubit extends Cubit<ChatState> {
     }
   }
 
+  /// Keeps the chat list and open chat app bar in sync after group name/avatar
+  /// changes (Group Info screen or WebSocket `group_updated`).
+  void applyGroupChannelPatch({
+    required String groupId,
+    String? name,
+    String? avatarUrl,
+  }) {
+    if (isClosed) return;
+    if (name == null && avatarUrl == null) return;
+    _repository.patchGroupChannelLocal(
+      groupId: groupId,
+      name: name,
+      avatarUrl: avatarUrl,
+    );
+    final updatedChannels = state.channels.map((c) {
+      if (c.groupId != groupId) return c;
+      return c.copyWith(name: name, avatarUrl: avatarUrl);
+    }).toList();
+    ChatChannel? selected = state.selectedChannel;
+    if (selected?.groupId == groupId) {
+      selected = selected!.copyWith(name: name, avatarUrl: avatarUrl);
+    }
+    emit(state.copyWith(channels: updatedChannels, selectedChannel: selected));
+  }
+
   Future<UserSearchResult?> updateCurrentUserProfile({
     required String displayName,
     required String statusText,
@@ -595,6 +620,19 @@ class ChatCubit extends Cubit<ChatState> {
     _refreshChannelList();
   }
 
+  void _handleGroupUpdated(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'];
+    if (data is! Map<String, dynamic>) return;
+    final groupId = _stringFrom(data['group_id']);
+    if (groupId == null || groupId.isEmpty) return;
+    applyGroupChannelPatch(
+      groupId: groupId,
+      name: _stringFrom(data['name']),
+      avatarUrl: _stringFrom(data['avatar_url']),
+    );
+  }
+
   void _handleSocketMessage(dynamic event) {
     debugPrint('[ChatCubit] _handleSocketMessage called (isClosed=$isClosed)');
     if (isClosed) return;
@@ -624,6 +662,10 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
+    if (eventType == 'group_updated') {
+      _handleGroupUpdated(raw);
+      return;
+    }
     if (eventType == 'typing_indicator' ||
         eventType == 'typing_start' ||
         eventType == 'typing_stop') {

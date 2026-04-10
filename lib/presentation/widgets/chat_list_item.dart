@@ -31,6 +31,12 @@ class ChatListItem extends StatelessWidget {
   }
 
   String _formatTime(DateTime time) {
+    // Backend sometimes sends year 1 or pre-epoch placeholders when there is no
+    // real last_message_at (common for new group chats) — avoid showing "1/1/1".
+    if (time.year < 1970) {
+      return '';
+    }
+
     final now = DateTime.now();
     final today = DateTime(now.year, now.month, now.day);
     final msgDate = DateTime(time.year, time.month, time.day);
@@ -67,6 +73,7 @@ class ChatListItem extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final showUnreadBadge = channel.unreadCount > 0 && !channel.isMuted;
+    final timeLabel = _formatTime(channel.lastMessageTime);
     return InkWell(
       onTap: onTap,
       onLongPress: onLongPress,
@@ -99,15 +106,16 @@ class ChatListItem extends StatelessWidget {
                           ),
                         ),
                       ),
-                      Text(
-                        _formatTime(channel.lastMessageTime),
-                        style: TextStyle(
-                          color: channel.unreadCount > 0
-                              ? AppColors.accent
-                              : AppColors.textSecondary,
-                          fontSize: 12,
+                      if (timeLabel.isNotEmpty)
+                        Text(
+                          timeLabel,
+                          style: TextStyle(
+                            color: channel.unreadCount > 0
+                                ? AppColors.accent
+                                : AppColors.textSecondary,
+                            fontSize: 12,
+                          ),
                         ),
-                      ),
                     ],
                   ),
                   const SizedBox(height: 4),

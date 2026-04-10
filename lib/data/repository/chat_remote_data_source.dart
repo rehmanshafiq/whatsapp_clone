@@ -1480,6 +1480,9 @@ class ChatRemoteDataSource {
         _asString(json['peer_avatar_url']) ??
         _asString(json['avatar_url']) ??
         _asString(json['avatar']) ??
+        _asString(groupObj?['avatar_url']) ??
+        _asString(groupObj?['photo_url']) ??
+        _asString(groupObj?['avatar']) ??
         _asString(otherUserMap?['avatar_url']) ??
         '';
     final lastMessage =
@@ -1490,7 +1493,7 @@ class ChatRemoteDataSource {
         _asString(json['last_message']) ??
         '';
 
-    final lastMessageTime =
+    var lastMessageTime =
         _asDateTime(json['last_message_at']) ??
         _asDateTime(lastMessageMap?['created_at']) ??
         _asDateTime(lastMessageMap?['timestamp']) ??
@@ -1498,6 +1501,10 @@ class ChatRemoteDataSource {
         _asDateTime(json['last_message_time']) ??
         _asDateTime(json['created_at']) ??
         DateTime.now();
+    // Some APIs send 0001-01-01 or invalid created_at; don't use as last activity.
+    if (lastMessageTime.year < 1970) {
+      lastMessageTime = DateTime.now();
+    }
 
     final peerUserId =
         _asString(json['peer_user_id']) ?? _asString(otherUserMap?['id']);
