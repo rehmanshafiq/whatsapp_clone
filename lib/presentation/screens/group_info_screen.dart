@@ -88,14 +88,7 @@ class _GroupInfoView extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              actions: [
-                if (state.canManageMembers && state.groupDetails != null)
-                  IconButton(
-                    tooltip: 'Edit group',
-                    icon: const Icon(Icons.edit, color: AppColors.accent),
-                    onPressed: () => _showEditGroupDialog(context, state),
-                  ),
-              ],
+              
             ),
             body: const _Body(),
           );
@@ -314,12 +307,28 @@ class _BodyState extends State<_Body> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            const Text(
-                              'Description',
-                              style: TextStyle(
-                                color: AppColors.textSecondary,
-                                fontSize: 13,
-                              ),
+                            Row(
+                              children: [
+                                const Text(
+                                  'Description',
+                                  style: TextStyle(
+                                    color: AppColors.textSecondary,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                if (state.canManageMembers) ...[
+                                  const Spacer(),
+                                  Text(
+                                    'Tap to edit',
+                                    style: TextStyle(
+                                      color: AppColors.accent.withValues(
+                                          alpha: 0.85),
+                                      fontSize: 12,
+                                      fontStyle: FontStyle.italic,
+                                    ),
+                                  ),
+                                ],
+                              ],
                             ),
                             const SizedBox(height: 4),
                             Text(
