@@ -1,4 +1,3 @@
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
@@ -206,57 +205,6 @@ void _confirmAction(
   );
 }
 
-Future<void> _pickGroupPhoto(BuildContext context) async {
-  final result = await FilePicker.platform.pickFiles(
-    type: FileType.image,
-    allowMultiple: false,
-    withData: false,
-  );
-  if (result == null || result.files.isEmpty) return;
-  final path = result.files.single.path;
-  if (path == null || path.isEmpty) return;
-  if (!context.mounted) return;
-  context.read<GroupInfoBloc>().add(UpdateGroupAvatarFromFile(path));
-}
-
-void _showAvatarOptionsSheet(BuildContext context, GroupInfoState state) {
-  final hasAvatar =
-      (state.groupDetails?.avatarUrl ?? '').trim().isNotEmpty;
-  showModalBottomSheet<void>(
-    context: context,
-    backgroundColor: AppColors.appBar,
-    builder: (ctx) => SafeArea(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          ListTile(
-            leading: const Icon(Icons.photo_library, color: AppColors.accent),
-            title: const Text('Choose from gallery',
-                style: TextStyle(color: AppColors.textPrimary)),
-            onTap: () async {
-              Navigator.pop(ctx);
-              await _pickGroupPhoto(context);
-            },
-          ),
-          if (hasAvatar)
-            ListTile(
-              leading:
-                  const Icon(Icons.delete_outline, color: Colors.redAccent),
-              title: const Text('Remove photo',
-                  style: TextStyle(color: Colors.redAccent)),
-              onTap: () {
-                Navigator.pop(ctx);
-                context.read<GroupInfoBloc>().add(
-                      const UpdateGroup(avatarUrl: ''),
-                    );
-              },
-            ),
-        ],
-      ),
-    ),
-  );
-}
-
 List<GroupMember> _filterMembersLocal(
   List<GroupMember> members,
   String query,
@@ -347,9 +295,6 @@ class _BodyState extends State<_Body> {
                     avatarUrl: details.avatarUrl,
                     memberCount: state.members.length,
                     canManage: state.canManageMembers,
-                    onAvatarTap: state.canManageMembers
-                        ? () => _showAvatarOptionsSheet(context, state)
-                        : null,
                     onEditTap: state.canManageMembers
                         ? () => _showEditGroupDialog(context, state)
                         : null,
@@ -666,7 +611,6 @@ class _GroupHeader extends StatelessWidget {
     required this.avatarUrl,
     required this.memberCount,
     required this.canManage,
-    this.onAvatarTap,
     this.onEditTap,
   });
 
@@ -674,53 +618,19 @@ class _GroupHeader extends StatelessWidget {
   final String avatarUrl;
   final int memberCount;
   final bool canManage;
-  final VoidCallback? onAvatarTap;
   final VoidCallback? onEditTap;
 
   @override
   Widget build(BuildContext context) {
-    final avatar = ChatAvatar(
-      imageUrl: avatarUrl,
-      name: name,
-      radius: 48,
-      isGroup: true,
-    );
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 20),
       child: Column(
         children: [
-          Stack(
-            clipBehavior: Clip.none,
-            alignment: Alignment.center,
-            children: [
-              Material(
-                color: Colors.transparent,
-                child: InkWell(
-                  onTap: canManage ? onAvatarTap : null,
-                  customBorder: const CircleBorder(),
-                  child: avatar,
-                ),
-              ),
-              if (canManage)
-                Positioned(
-                  right: -4,
-                  bottom: -4,
-                  child: Material(
-                    color: AppColors.accent,
-                    shape: const CircleBorder(),
-                    child: InkWell(
-                      onTap: onAvatarTap,
-                      customBorder: const CircleBorder(),
-                      child: const Padding(
-                        padding: EdgeInsets.all(6),
-                        child: Icon(Icons.camera_alt,
-                            size: 16, color: AppColors.scaffold),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
+          ChatAvatar(
+            imageUrl: avatarUrl,
+            name: name,
+            radius: 48,
+            isGroup: true,
           ),
           const SizedBox(height: 14),
           InkWell(

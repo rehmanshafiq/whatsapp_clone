@@ -25,15 +25,6 @@ final class UpdateGroup extends GroupInfoEvent {
   List<Object?> get props => [name, description, avatarUrl];
 }
 
-/// Picks an image file, uploads it, then sets the group avatar URL.
-final class UpdateGroupAvatarFromFile extends GroupInfoEvent {
-  const UpdateGroupAvatarFromFile(this.filePath);
-  final String filePath;
-
-  @override
-  List<Object?> get props => [filePath];
-}
-
 final class DeleteGroupRequested extends GroupInfoEvent {
   const DeleteGroupRequested();
 }

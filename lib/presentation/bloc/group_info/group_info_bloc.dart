@@ -15,7 +15,6 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
     _syncCurrentUserId();
     on<LoadGroupInfo>(_onLoad);
     on<UpdateGroup>(_onUpdateGroup);
-    on<UpdateGroupAvatarFromFile>(_onUpdateGroupAvatarFromFile);
     on<DeleteGroupRequested>(_onDeleteGroup);
     on<AddMembersRequested>(_onAddMembers);
     on<RemoveMemberRequested>(_onRemoveMember);
@@ -73,31 +72,6 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
         name: event.name,
         description: event.description,
         avatarUrl: event.avatarUrl,
-      );
-      final merged = state.groupDetails != null
-          ? updated.mergeMissingFrom(state.groupDetails!)
-          : updated;
-      emit(state.copyWith(groupDetails: merged, isUpdating: false));
-    } on ApiException catch (e) {
-      emit(state.copyWith(isUpdating: false, actionError: e.message));
-    } catch (e) {
-      emit(state.copyWith(isUpdating: false, actionError: e.toString()));
-    }
-  }
-
-  Future<void> _onUpdateGroupAvatarFromFile(
-    UpdateGroupAvatarFromFile event,
-    Emitter<GroupInfoState> emit,
-  ) async {
-    emit(state.copyWith(isUpdating: true, clearActionError: true));
-    try {
-      final url = await _repository.uploadMedia(
-        filePath: event.filePath,
-        type: 'image',
-      );
-      final updated = await _repository.updateGroup(
-        groupId: state.groupId,
-        avatarUrl: url,
       );
       final merged = state.groupDetails != null
           ? updated.mergeMissingFrom(state.groupDetails!)
