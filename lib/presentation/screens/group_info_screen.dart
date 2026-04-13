@@ -1,11 +1,15 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../core/di/service_locator.dart';
+import '../../core/network/api_exception.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/models/group_member.dart';
+import '../../data/models/user_search.dart';
 import '../../data/repository/chat_repository.dart';
 import '../bloc/group_info/group_info_bloc.dart';
 import '../cubit/chat_cubit.dart';
@@ -88,7 +92,7 @@ class _GroupInfoView extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
-              
+
             ),
             body: const _Body(),
           );
@@ -113,53 +117,258 @@ void _showEditGroupDialog(BuildContext context, GroupInfoState state) {
   );
 }
 
-void _showAddMembersDialog(BuildContext context) {
-  var input = '';
+void _showAddMembersDialog(BuildContext context, GroupInfoState state) {
+  final existing = state.members.map((m) => m.userId).toSet();
+  final bloc = context.read<GroupInfoBloc>();
   showDialog<void>(
     context: context,
-    builder: (dialogCtx) {
-      return AlertDialog(
-        backgroundColor: AppColors.appBar,
-        title: const Text('Add members',
-            style: TextStyle(color: AppColors.textPrimary)),
-        content: TextField(
-          autofocus: true,
-          style: const TextStyle(color: AppColors.textPrimary),
-          decoration: const InputDecoration(
-            hintText: 'Enter user IDs (comma-separated)',
-            hintStyle: TextStyle(color: AppColors.textSecondary),
-            enabledBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: AppColors.divider)),
-            focusedBorder: UnderlineInputBorder(
-                borderSide: BorderSide(color: AppColors.accent)),
-          ),
-          onChanged: (v) => input = v,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogCtx).pop(),
-            child: const Text('Cancel',
-                style: TextStyle(color: AppColors.textSecondary)),
-          ),
-          TextButton(
-            onPressed: () {
-              Navigator.of(dialogCtx).pop();
-              final ids = input
-                  .split(',')
-                  .map((s) => s.trim())
-                  .where((s) => s.isNotEmpty)
-                  .toList();
-              if (ids.isNotEmpty) {
-                context.read<GroupInfoBloc>().add(AddMembersRequested(ids));
-              }
-            },
-            child:
-                const Text('Add', style: TextStyle(color: AppColors.accent)),
-          ),
-        ],
-      );
-    },
+    builder: (dialogCtx) => _AddMembersDialog(
+      bloc: bloc,
+      repository: getIt<ChatRepository>(),
+      existingUserIds: existing,
+    ),
   );
+}
+
+bool _isUuid(String s) {
+  return RegExp(
+    r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+  ).hasMatch(s.trim());
+}
+
+class _AddMembersDialog extends StatefulWidget {
+  const _AddMembersDialog({
+    required this.bloc,
+    required this.repository,
+    required this.existingUserIds,
+  });
+
+  final GroupInfoBloc bloc;
+  final ChatRepository repository;
+  final Set<String> existingUserIds;
+
+  @override
+  State<_AddMembersDialog> createState() => _AddMembersDialogState();
+}
+
+class _AddMembersDialogState extends State<_AddMembersDialog> {
+  final _searchController = TextEditingController();
+  final _pasteController = TextEditingController();
+  Timer? _debounce;
+  List<UserSearchResult> _results = [];
+  final Set<String> _selectedIds = {};
+  bool _searching = false;
+  String? _searchError;
+
+  @override
+  void dispose() {
+    _debounce?.cancel();
+    _searchController.dispose();
+    _pasteController.dispose();
+    super.dispose();
+  }
+
+  void _onSearchChanged(String value) {
+    _debounce?.cancel();
+    final trimmed = value.trim();
+    if (trimmed.length < 2) {
+      setState(() {
+        _results = [];
+        _searchError = null;
+      });
+      return;
+    }
+    _debounce =
+        Timer(const Duration(milliseconds: 400), () => _runSearch(trimmed));
+  }
+
+  Future<void> _runSearch(String query) async {
+    setState(() {
+      _searching = true;
+      _searchError = null;
+    });
+    try {
+      final list = await widget.repository.searchUsers(query);
+      if (!mounted) return;
+      setState(() {
+        // Show every API match. Users already in the group stay visible but are
+        // not selectable (otherwise the list looks empty while the network
+        // succeeded — same as web "Find" showing the row).
+        _results = list;
+        _searching = false;
+      });
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _searchError = e.message;
+        _results = [];
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _searching = false;
+        _searchError = e.toString();
+        _results = [];
+      });
+    }
+  }
+
+  void _toggleSelected(String userId) {
+    setState(() {
+      if (_selectedIds.contains(userId)) {
+        _selectedIds.remove(userId);
+      } else {
+        _selectedIds.add(userId);
+      }
+    });
+  }
+
+  void _addPasteIdsToSelection() {
+    final raw = _pasteController.text;
+    final parts =
+        raw.split(',').map((s) => s.trim()).where((s) => s.isNotEmpty);
+    final valid = <String>[];
+    final invalid = <String>[];
+    for (final p in parts) {
+      if (_isUuid(p)) {
+        if (!widget.existingUserIds.contains(p)) {
+          valid.add(p.trim());
+        }
+      } else {
+        invalid.add(p);
+      }
+    }
+    if (invalid.isNotEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Use search for names, or paste UUIDs only. Not valid: ${invalid.join(", ")}',
+          ),
+          backgroundColor: Colors.redAccent,
+        ),
+      );
+    }
+    if (valid.isEmpty) return;
+    setState(() => _selectedIds.addAll(valid));
+  }
+
+  void _submit() {
+    if (_selectedIds.isEmpty) return;
+    Navigator.of(context).pop();
+    widget.bloc.add(AddMembersRequested(_selectedIds.toList()));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppColors.appBar,
+      title: const Text('Add members',
+          style: TextStyle(color: AppColors.textPrimary)),
+      content: SizedBox(
+        width: double.maxFinite,
+        height: 440,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            TextField(
+              controller: _searchController,
+              autofocus: true,
+              onChanged: _onSearchChanged,
+              style: const TextStyle(color: AppColors.textPrimary),
+              decoration: const InputDecoration(
+                hintText: 'Search by username',
+                hintStyle: TextStyle(color: AppColors.textSecondary),
+                prefixIcon:
+                    Icon(Icons.search, color: AppColors.iconMuted, size: 22),
+                enabledBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.divider)),
+                focusedBorder: UnderlineInputBorder(
+                    borderSide: BorderSide(color: AppColors.accent)),
+              ),
+            ),
+            if (_searchError != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  _searchError!,
+                  style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+                ),
+              ),
+            Expanded(
+              child: _searching
+                  ? const Center(
+                      child: CircularProgressIndicator(
+                          color: AppColors.accent),
+                    )
+                  : _results.isEmpty
+                      ? Center(
+                          child: Text(
+                            _searchController.text.trim().length < 2
+                                ? 'Type user names to search'
+                                : 'No users found',
+                            style: const TextStyle(
+                                color: AppColors.textSecondary, fontSize: 14),
+                            textAlign: TextAlign.center,
+                          ),
+                        )
+                      : ListView.builder(
+                      itemCount: _results.length,
+                      itemBuilder: (ctx, i) {
+                        final u = _results[i];
+                        final alreadyMember =
+                            widget.existingUserIds.contains(u.userId);
+                        final checked = _selectedIds.contains(u.userId);
+                        return CheckboxListTile(
+                          value: checked,
+                          onChanged: alreadyMember
+                              ? null
+                              : (_) => _toggleSelected(u.userId),
+                          title: Text(
+                            u.displayName,
+                            style: TextStyle(
+                              color: alreadyMember
+                                  ? AppColors.textSecondary
+                                  : AppColors.textPrimary,
+                            ),
+                          ),
+                          subtitle: Text(
+                            alreadyMember
+                                ? '@${u.username} · Already in this group'
+                                : '@${u.username}',
+                            style: const TextStyle(
+                                color: AppColors.textSecondary, fontSize: 13),
+                          ),
+                          dense: true,
+                          controlAffinity: ListTileControlAffinity.leading,
+                        );
+                      },
+                    ),
+            ),
+
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel',
+              style: TextStyle(color: AppColors.textSecondary)),
+        ),
+        TextButton(
+          onPressed: _selectedIds.isEmpty ? null : _submit,
+          child: Text(
+            'Add${_selectedIds.isEmpty ? "" : " (${_selectedIds.length})"}',
+            style: TextStyle(
+              color: _selectedIds.isEmpty
+                  ? AppColors.textSecondary
+                  : AppColors.accent,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
 }
 
 void _confirmAction(
@@ -425,11 +634,11 @@ class _BodyState extends State<_Body> {
                         style: TextStyle(color: AppColors.textPrimary),
                       ),
                       subtitle: const Text(
-                        'Add participants by user ID',
+                        'Search by username or paste UUIDs',
                         style: TextStyle(
                             color: AppColors.textSecondary, fontSize: 13),
                       ),
-                      onTap: () => _showAddMembersDialog(context),
+                      onTap: () => _showAddMembersDialog(context, state),
                     ),
 
                   ...() {

@@ -147,13 +147,17 @@ class ChatRemoteDataSource {
       if (data == null) return const <UserSearchResult>[];
 
       if (data is List) {
-        return data
-            .whereType<Map<String, dynamic>>()
-            .map(_mapUserSearch)
-            .toList();
+        final out = <UserSearchResult>[];
+        for (final item in data) {
+          if (item is! Map) continue;
+          out.add(_mapUserSearch(Map<String, dynamic>.from(item)));
+        }
+        return out;
       }
-      if (data is Map<String, dynamic>) {
-        return <UserSearchResult>[_mapUserSearch(data)];
+      if (data is Map) {
+        return <UserSearchResult>[
+          _mapUserSearch(Map<String, dynamic>.from(data)),
+        ];
       }
 
       throw const ApiException(
@@ -198,16 +202,17 @@ class ChatRemoteDataSource {
 
       final dynamic raw = response.data;
       final dynamic data = raw is String ? json.decode(raw) : raw;
-      if (data is! Map<String, dynamic>) {
+      if (data is! Map) {
         throw const ApiException(
           message: 'Invalid presence response from server.',
           statusCode: 500,
         );
       }
+      final map = Map<String, dynamic>.from(data);
 
-      final status = data['status'] as String?;
-      final lastSeen = data['last_seen'] is int
-          ? data['last_seen'] as int
+      final status = map['status'] as String?;
+      final lastSeen = map['last_seen'] is int
+          ? map['last_seen'] as int
           : null;
 
       return baseUser.copyWith(presenceStatus: status, lastSeen: lastSeen);

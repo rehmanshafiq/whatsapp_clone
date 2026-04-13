@@ -114,7 +114,17 @@ class GroupInfoBloc extends Bloc<GroupInfoEvent, GroupInfoState> {
         userIds: event.userIds,
       );
       final members = await _repository.listGroupMembers(state.groupId);
-      emit(state.copyWith(members: members, isUpdating: false));
+      GroupDetails? details = state.groupDetails;
+      try {
+        details = await _repository.getGroupDetails(state.groupId);
+      } catch (_) {
+        // Keep previous details if refresh fails; member list is authoritative.
+      }
+      emit(state.copyWith(
+        members: members,
+        groupDetails: details,
+        isUpdating: false,
+      ));
     } on ApiException catch (e) {
       emit(state.copyWith(isUpdating: false, actionError: e.message));
     } catch (e) {
