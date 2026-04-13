@@ -2361,6 +2361,31 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(channels: updated));
   }
 
+  /// Syncs in-memory chat list after [ChatRepository.leaveGroup] or
+  /// [ChatRepository.deleteGroup] (storage is already updated there).
+  void removeChannelsForGroup(String groupId) {
+    if (isClosed || groupId.isEmpty) return;
+    final channels =
+        state.channels.where((c) => c.groupId != groupId).toList();
+    final dropOpenChat = state.selectedChannel?.groupId == groupId;
+    if (dropOpenChat) {
+      emit(
+        state.copyWith(
+          channels: channels,
+          clearSelectedChannel: true,
+          clearReplyingTo: true,
+          messages: const <Message>[],
+          isTyping: false,
+          isRecordingAudio: false,
+          isOnline: false,
+          hasLoadedMessages: false,
+        ),
+      );
+    } else {
+      emit(state.copyWith(channels: channels));
+    }
+  }
+
   Future<String> openOrCreateChat(User contact) async {
     final channel = _repository.createChat(contact);
     final updatedChats = await _repository.getChats();

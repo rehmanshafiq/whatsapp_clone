@@ -45,6 +45,7 @@ class _GroupInfoView extends StatelessWidget {
           (curr.actionError != null && curr.actionError != prev.actionError),
       listener: (context, state) {
         if (state.isDeleted || state.hasLeft) {
+          context.read<ChatCubit>().removeChannelsForGroup(state.groupId);
           context.read<GroupInfoBloc>().add(const ActionConsumed());
           context.goNamed(AppRouter.chats);
           return;
