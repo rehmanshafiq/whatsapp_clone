@@ -267,7 +267,7 @@ class _AddMembersDialogState extends State<_AddMembersDialog> {
           style: TextStyle(color: AppColors.textPrimary)),
       content: SizedBox(
         width: double.maxFinite,
-        height: 440,
+        height: 140,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -287,64 +287,67 @@ class _AddMembersDialogState extends State<_AddMembersDialog> {
                     borderSide: BorderSide(color: AppColors.accent)),
               ),
             ),
-            if (_searchError != null)
-              Padding(
-                padding: const EdgeInsets.only(top: 8),
-                child: Text(
-                  _searchError!,
-                  style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+            // if (_searchError != null)
+            //   Padding(
+            //     padding: const EdgeInsets.only(top: 8),
+            //     child: Text(
+            //       _searchError!,
+            //       style: const TextStyle(color: Colors.redAccent, fontSize: 13),
+            //     ),
+            //   ),
+            if (_searching)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 24),
+                child: Center(
+                  child: CircularProgressIndicator(color: AppColors.accent),
                 ),
-              ),
-            Expanded(
-              child: _searching
-                  ? const Center(
-                      child: CircularProgressIndicator(
-                          color: AppColors.accent),
-                    )
-                  : _results.isEmpty
-                      ? Center(
-                          child: Text(
-                            _searchController.text.trim().length < 2
-                                ? 'Type user names to search'
-                                : 'No users found',
-                            style: const TextStyle(
-                                color: AppColors.textSecondary, fontSize: 14),
-                            textAlign: TextAlign.center,
-                          ),
-                        )
-                      : ListView.builder(
-                      itemCount: _results.length,
-                      itemBuilder: (ctx, i) {
-                        final u = _results[i];
-                        final alreadyMember =
-                            widget.existingUserIds.contains(u.userId);
-                        final checked = _selectedIds.contains(u.userId);
-                        return CheckboxListTile(
-                          value: checked,
-                          onChanged: alreadyMember
-                              ? null
-                              : (_) => _toggleSelected(u.userId),
-                          title: Text(
-                            u.displayName,
-                            style: TextStyle(
-                              color: alreadyMember
-                                  ? AppColors.textSecondary
-                                  : AppColors.textPrimary,
-                            ),
-                          ),
-                          subtitle: Text(
-                            alreadyMember
-                                ? '@${u.username} · Already in this group'
-                                : '@${u.username}',
-                            style: const TextStyle(
-                                color: AppColors.textSecondary, fontSize: 13),
-                          ),
-                          dense: true,
-                          controlAffinity: ListTileControlAffinity.leading,
-                        );
-                      },
+              )
+            else if (_results.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 24),
+                child: Text(
+                  _searchController.text.trim().length < 2
+                      ? 'Type user names to search'
+                      : 'No users found',
+                  style: const TextStyle(
+                      color: AppColors.textSecondary, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+              )
+            else
+              ListView.builder(
+                shrinkWrap: true,
+                itemCount: _results.length,
+                itemBuilder: (ctx, i) {
+                  final u = _results[i];
+                  final alreadyMember =
+                  widget.existingUserIds.contains(u.userId);
+                  final checked = _selectedIds.contains(u.userId);
+                  return CheckboxListTile(
+                    value: checked,
+                    onChanged: alreadyMember
+                        ? null
+                        : (_) => _toggleSelected(u.userId),
+                    title: Text(
+                      u.displayName,
+                      style: TextStyle(
+                        color: alreadyMember
+                            ? AppColors.textSecondary
+                            : AppColors.textPrimary,
+                      ),
                     ),
-            ),
+                    subtitle: Text(
+                      alreadyMember
+                          ? '@${u.username} · Already in this group'
+                          : '@${u.username}',
+                      style: const TextStyle(
+                          color: AppColors.textSecondary, fontSize: 13),
+                    ),
+                    dense: true,
+                    controlAffinity: ListTileControlAffinity.leading,
+                  );
+                },
+              ),
 
           ],
         ),
