@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/di/service_locator.dart';
+import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
 import '../../data/models/message.dart';
@@ -88,6 +89,11 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   String _capitalizeName(String name) {
     if (name.isEmpty) return name;
     return name[0].toUpperCase() + name.substring(1);
+  }
+
+  String _displayName(String? name, {String fallback = 'Chat'}) {
+    if (name == null || name.trim().isEmpty) return fallback;
+    return _capitalizeName(name);
   }
 
   // ------------------------------------------------------------------
@@ -595,20 +601,38 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
               backgroundColor: AppColors.appBar,
               leadingWidth: 32,
               leading: IconButton(
-                icon: const Icon(
-                  Icons.arrow_back,
-                  color: AppColors.textPrimary,
+                icon: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 14.0),
+                  child: const Icon(
+                    Icons.arrow_back,
+                    color: AppColors.textPrimary,
+                  ),
                 ),
                 onPressed: () => context.pop(),
                 padding: EdgeInsets.zero,
               ),
-              title: Row(
+              title: GestureDetector(
+              onTap: () {
+                if (channel != null &&
+                    channel.isGroup &&
+                    channel.groupId != null) {
+                  context.goNamed(
+                    AppRouter.groupInfo,
+                    pathParameters: {
+                      'id': widget.channelId,
+                      'groupId': channel.groupId!,
+                    },
+                  );
+                }
+              },
+              child: Row(
                 children: [
                   ChatAvatar(
                     imageUrl: channel?.avatarUrl,
-                    name: _capitalizeName(channel?.name ?? ''),
+                    name: _displayName(channel?.name),
                     radius: 18,
                     heroTag: 'avatar_${widget.channelId}',
+                    isGroup: channel?.isGroup ?? false,
                   ),
                   const SizedBox(width: 10),
                   Expanded(
@@ -616,14 +640,22 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          _capitalizeName(channel?.name ?? 'Chat'),
+                          _displayName(channel?.name),
                           style: const TextStyle(
                             color: AppColors.textPrimary,
                             fontSize: 16,
                             fontWeight: FontWeight.w600,
                           ),
                         ),
-                        if (state.isRecordingAudio)
+                        if (channel?.isGroup == true)
+                          Text(
+                            'tap here for group info',
+                            style: TextStyle(
+                              color: AppColors.textSecondary,
+                              fontSize: 12,
+                            ),
+                          )
+                        else if (state.isRecordingAudio)
                           Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
@@ -667,6 +699,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                   ),
                 ],
               ),
+            ),
             ),
             body: Stack(
               children: [
@@ -804,6 +837,7 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                                         isFlashHighlighted:
                                             _flashingMessageId == message.id &&
                                             _showFlashingOverlay,
+                                        isGroupChat: channel?.isGroup ?? false,
                                         onReplyPreviewTap:
                                             (message.replyToMessageId == null ||
                                                 message

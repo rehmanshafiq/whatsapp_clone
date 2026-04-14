@@ -140,16 +140,26 @@ class _AudioMessageBubbleState extends State<AudioMessageBubble>
   void _togglePlayback() => unawaited(_togglePlaybackInternal());
 
   Future<void> _togglePlaybackInternal() async {
-    // ── Path resolution priority (FIX) ────────────────────────────────────
+    // ── Path resolution priority ──────────────────────────────────────────
     //
-    // After upload the local file is deleted / no longer reliable.
-    // Always prefer the server mediaUrl; only fall back to the local
-    // audioPath when no server URL is available yet (e.g. optimistic UI
-    // before the upload response arrives).
+    // 1. Local file (audioPath / localFilePath) — instant, no network.
+    //    For just-sent messages the recording is still on disk.
+    // 2. Server mediaUrl — for received messages or when local is gone.
     //
-    // Old code:  audioPath ?? mediaUrl   ← picks the deleted local file first
-    // New code:  mediaUrl  ?? audioPath  ← picks the permanent server URL first
-    String? rawPath = widget.message.mediaUrl ?? widget.message.audioPath;
+    String? rawPath;
+
+    // Try local file first.
+    final localCandidate =
+        widget.message.audioPath ?? widget.message.localFilePath;
+    if (localCandidate != null && localCandidate.isNotEmpty) {
+      final f = File(localCandidate);
+      if (f.existsSync() && f.lengthSync() > 0) {
+        rawPath = localCandidate;
+      }
+    }
+
+    // Fall back to server URL.
+    rawPath ??= widget.message.mediaUrl;
     if (rawPath == null) return;
 
     // Resolve server-relative paths to full URLs.

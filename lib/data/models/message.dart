@@ -8,6 +8,7 @@ class Message extends Equatable {
   final String id;
   final String channelId;
   final String senderId;
+  final String? senderName;
   final String text;
   final DateTime timestamp;
   final MessageStatus status;
@@ -63,6 +64,7 @@ class Message extends Equatable {
     required this.id,
     required this.channelId,
     required this.senderId,
+    this.senderName,
     this.text = '',
     required this.timestamp,
     this.status = MessageStatus.sending,
@@ -104,6 +106,7 @@ class Message extends Equatable {
     String? id,
     String? channelId,
     String? senderId,
+    String? senderName,
     String? text,
     DateTime? timestamp,
     MessageStatus? status,
@@ -144,6 +147,7 @@ class Message extends Equatable {
       id: id ?? this.id,
       channelId: channelId ?? this.channelId,
       senderId: senderId ?? this.senderId,
+      senderName: senderName ?? this.senderName,
       text: text ?? this.text,
       timestamp: timestamp ?? this.timestamp,
       status: status ?? this.status,
@@ -188,6 +192,7 @@ class Message extends Equatable {
     'id': id,
     'channelId': channelId,
     'senderId': senderId,
+    'senderName': senderName,
     'text': text,
     'timestamp': timestamp.toIso8601String(),
     'status': status.index,
@@ -229,6 +234,7 @@ class Message extends Equatable {
     id: json['id'] as String,
     channelId: json['channelId'] as String,
     senderId: json['senderId'] as String,
+    senderName: json['senderName'] as String?,
     text: json['text'] as String? ?? '',
     timestamp: DateTime.parse(json['timestamp'] as String),
     status: MessageStatus.values[json['status'] as int],
@@ -304,6 +310,7 @@ class Message extends Equatable {
     id,
     channelId,
     senderId,
+    senderName,
     text,
     timestamp,
     status,

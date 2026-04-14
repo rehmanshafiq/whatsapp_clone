@@ -6,7 +6,10 @@ import 'package:dio/dio.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/utils/document_attachment_filename.dart';
 import '../models/chat_channel.dart';
+import '../models/group_details.dart';
+import '../models/group_member.dart';
 import '../models/message.dart';
 import '../models/message_status.dart';
 import '../models/user.dart';
@@ -144,13 +147,17 @@ class ChatRemoteDataSource {
       if (data == null) return const <UserSearchResult>[];
 
       if (data is List) {
-        return data
-            .whereType<Map<String, dynamic>>()
-            .map(_mapUserSearch)
-            .toList();
+        final out = <UserSearchResult>[];
+        for (final item in data) {
+          if (item is! Map) continue;
+          out.add(_mapUserSearch(Map<String, dynamic>.from(item)));
+        }
+        return out;
       }
-      if (data is Map<String, dynamic>) {
-        return <UserSearchResult>[_mapUserSearch(data)];
+      if (data is Map) {
+        return <UserSearchResult>[
+          _mapUserSearch(Map<String, dynamic>.from(data)),
+        ];
       }
 
       throw const ApiException(
@@ -195,16 +202,17 @@ class ChatRemoteDataSource {
 
       final dynamic raw = response.data;
       final dynamic data = raw is String ? json.decode(raw) : raw;
-      if (data is! Map<String, dynamic>) {
+      if (data is! Map) {
         throw const ApiException(
           message: 'Invalid presence response from server.',
           statusCode: 500,
         );
       }
+      final map = Map<String, dynamic>.from(data);
 
-      final status = data['status'] as String?;
-      final lastSeen = data['last_seen'] is int
-          ? data['last_seen'] as int
+      final status = map['status'] as String?;
+      final lastSeen = map['last_seen'] is int
+          ? map['last_seen'] as int
           : null;
 
       return baseUser.copyWith(presenceStatus: status, lastSeen: lastSeen);
@@ -325,6 +333,331 @@ class ChatRemoteDataSource {
     }
   }
 
+  Future<ChatChannel> createGroup({
+    required String token,
+    required String name,
+    String description = '',
+    String avatarUrl = '',
+    required List<String> memberIds,
+  }) async {
+    try {
+      final response = await _dio.post<dynamic>(
+        '/api/v1/chat/groups',
+        data: <String, dynamic>{
+          'name': name,
+          'description': description,
+          'avatar_url': avatarUrl,
+          'member_ids': memberIds,
+        },
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        return _mapConversationToChannel(data);
+      }
+      if (data is List &&
+          data.isNotEmpty &&
+          data.first is Map<String, dynamic>) {
+        return _mapConversationToChannel(data.first as Map<String, dynamic>);
+      }
+
+      throw const ApiException(
+        message: 'Invalid group response from server.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to create group.';
+
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> getGroupDetails({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is Map<String, dynamic>) {
+        return GroupDetails.fromJson(data);
+      }
+
+      throw const ApiException(
+        message: 'Invalid group details response from server.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to fetch group details.';
+
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (statusCode == 404) {
+        message = 'Group not found.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> updateGroup({
+    required String token,
+    required String groupId,
+    String? name,
+    String? description,
+    String? avatarUrl,
+  }) async {
+    try {
+      final data = <String, dynamic>{};
+      if (name != null) data['name'] = name;
+      if (description != null) data['description'] = description;
+      if (avatarUrl != null) data['avatar_url'] = avatarUrl;
+
+      final response = await _dio.put<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        data: data,
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic parsed = raw is String ? json.decode(raw) : raw;
+      if (parsed is Map<String, dynamic>) {
+        // Backend often returns only `{ "status": "updated" }` — not a group payload.
+        final hasGroupIdentity = parsed['group_id'] != null ||
+            parsed['conversation_id'] != null;
+        if (hasGroupIdentity) {
+          return GroupDetails.fromJson(parsed);
+        }
+        return getGroupDetails(token: token, groupId: groupId);
+      }
+      throw const ApiException(
+        message: 'Invalid update group response.',
+        statusCode: 500,
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'update group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> deleteGroup({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/groups/$groupId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'delete group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<GroupMember>> listGroupMembers({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/groups/$groupId/members',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data is List) {
+        return data
+            .whereType<Map<String, dynamic>>()
+            .map(GroupMember.fromJson)
+            .toList();
+      }
+      return const [];
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'list members');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> addGroupMembers({
+    required String token,
+    required String groupId,
+    required List<String> userIds,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/groups/$groupId/members',
+        data: <String, dynamic>{'user_ids': userIds},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'add members');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> removeGroupMember({
+    required String token,
+    required String groupId,
+    required String userId,
+  }) async {
+    try {
+      await _dio.delete<dynamic>(
+        '/api/v1/chat/groups/$groupId/members/$userId',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'remove member');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> updateMemberRole({
+    required String token,
+    required String groupId,
+    required String userId,
+    required String role,
+  }) async {
+    try {
+      await _dio.put<dynamic>(
+        '/api/v1/chat/groups/$groupId/members/$userId/role',
+        data: <String, dynamic>{'role': role},
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'update member role');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> leaveGroup({
+    required String token,
+    required String groupId,
+  }) async {
+    try {
+      await _dio.post<dynamic>(
+        '/api/v1/chat/groups/$groupId/leave',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+    } on DioException catch (e) {
+      throw _groupDioError(e, 'leave group');
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  ApiException _groupDioError(DioException e, String action) {
+    final statusCode = e.response?.statusCode;
+    String message = 'Failed to $action.';
+    if (statusCode == 401) {
+      message = 'Session expired. Please sign in again.';
+    } else if (statusCode == 403) {
+      message = 'You do not have permission to $action.';
+    } else if (statusCode == 404) {
+      message = 'Group not found.';
+    } else if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.connectionError ||
+        e.type == DioExceptionType.receiveTimeout) {
+      message = 'Network error. Please check your connection and retry.';
+    }
+    return ApiException(message: message, statusCode: statusCode);
+  }
+
   /// Paginated messages response: list plus next cursor / hasMore for older messages.
   static const int defaultMessagesLimit = 50;
 
@@ -435,6 +768,12 @@ class ChatRemoteDataSource {
         _asString(json['from_user_id']) ??
         _asString(json['senderId']) ??
         '';
+    final senderName =
+        _asString(json['sender_display_name']) ??
+        _asString(json['sender_name']) ??
+        _asString(json['senderName']) ??
+        _asString(json['display_name']) ??
+        _asString(json['username']);
     final text =
         _asString(json['text']) ??
         _asString(json['message']) ??
@@ -520,16 +859,40 @@ class ChatRemoteDataSource {
         _asString(json['replyToAttachmentType']);
     final isForwarded =
         json['is_forwarded'] == true || json['isForwarded'] == true;
+
+    // Document metadata — the API stores the filename in `body` for documents.
+    String? documentFileName =
+        _asString(json['file_name']) ??
+        _asString(json['document_name']) ??
+        _asString(json['attachment_name']) ??
+        _asString(json['documentFileName']);
+    if (documentFileName == null && type == MessageType.document) {
+      if (text.isNotEmpty && text.contains('.')) {
+        documentFileName = text;
+      } else if (attachmentUrl.isNotEmpty) {
+        documentFileName =
+            deriveDocumentFileNameFromAttachmentUrl(attachmentUrl);
+      }
+    }
+    final documentFileSize =
+        _asInt(json['file_size']) ??
+        _asInt(json['document_size']) ??
+        _asInt(json['attachment_size']) ??
+        _asInt(json['documentFileSize']);
+
     return Message(
       id: id.isEmpty ? 'msg_${ts.millisecondsSinceEpoch}' : id,
       channelId: channelId,
       senderId: senderId,
+      senderName: senderName,
       text: text,
       timestamp: ts,
       status: status,
       type: type,
       mediaUrl: attachmentUrl.isEmpty ? null : attachmentUrl,
       audioDuration: type == MessageType.audio ? audioDuration : null,
+      documentFileName: documentFileName,
+      documentFileSize: documentFileSize,
       deliveredAt: deliveredAt,
       readAt: readAt,
       isEdited: isEdited,
@@ -734,7 +1097,9 @@ class ChatRemoteDataSource {
         );
       }
 
-      // Prepend base URL if the response URL is relative
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        return url;
+      }
       final baseUrl = AppConstants.apiBaseUrl.replaceAll(RegExp(r'/$'), '');
       final path = url.startsWith('/') ? url : '/$url';
       return '$baseUrl$path';
@@ -1103,18 +1468,26 @@ class ChatRemoteDataSource {
       );
     }
 
+    final groupObj = json['group'] is Map<String, dynamic>
+        ? json['group'] as Map<String, dynamic>
+        : null;
     final name =
-        _asString(json['peer_display_name']) ??
-        _asString(json['name']) ??
-        _asString(json['title']) ??
-        _asString(json['display_name']) ??
-        _asString(otherUserMap?['display_name']) ??
-        _asString(otherUserMap?['username']) ??
+        _asNonEmptyString(json['peer_display_name']) ??
+        _asNonEmptyString(json['name']) ??
+        _asNonEmptyString(json['title']) ??
+        _asNonEmptyString(json['group_name']) ??
+        _asNonEmptyString(groupObj?['name']) ??
+        _asNonEmptyString(json['display_name']) ??
+        _asNonEmptyString(otherUserMap?['display_name']) ??
+        _asNonEmptyString(otherUserMap?['username']) ??
         'Unknown';
     final avatarUrl =
         _asString(json['peer_avatar_url']) ??
         _asString(json['avatar_url']) ??
         _asString(json['avatar']) ??
+        _asString(groupObj?['avatar_url']) ??
+        _asString(groupObj?['photo_url']) ??
+        _asString(groupObj?['avatar']) ??
         _asString(otherUserMap?['avatar_url']) ??
         '';
     final lastMessage =
@@ -1125,7 +1498,7 @@ class ChatRemoteDataSource {
         _asString(json['last_message']) ??
         '';
 
-    final lastMessageTime =
+    var lastMessageTime =
         _asDateTime(json['last_message_at']) ??
         _asDateTime(lastMessageMap?['created_at']) ??
         _asDateTime(lastMessageMap?['timestamp']) ??
@@ -1133,9 +1506,19 @@ class ChatRemoteDataSource {
         _asDateTime(json['last_message_time']) ??
         _asDateTime(json['created_at']) ??
         DateTime.now();
+    // Some APIs send 0001-01-01 or invalid created_at; don't use as last activity.
+    if (lastMessageTime.year < 1970) {
+      lastMessageTime = DateTime.now();
+    }
 
     final peerUserId =
         _asString(json['peer_user_id']) ?? _asString(otherUserMap?['id']);
+
+    final groupId = _asString(json['group_id']);
+    final isGroup =
+        _asBool(json['is_group']) ??
+        (json['type'] == 'group') ||
+        groupId != null;
 
     return ChatChannel(
       id: id,
@@ -1151,6 +1534,8 @@ class ChatRemoteDataSource {
           _asBool(json['isMuted']) ??
           _asBool(json['muted']) ??
           false,
+      isGroup: isGroup,
+      groupId: groupId,
     );
   }
 
@@ -1175,6 +1560,13 @@ class ChatRemoteDataSource {
     if (value is String) return value;
     if (value is num || value is bool) return value.toString();
     return null;
+  }
+
+  /// Like [_asString] but returns null for empty/whitespace-only strings.
+  String? _asNonEmptyString(dynamic value) {
+    final s = _asString(value);
+    if (s == null || s.trim().isEmpty) return null;
+    return s;
   }
 
   int? _asInt(dynamic value) {

@@ -5,6 +5,8 @@ import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../local/storage_service.dart';
 import '../models/chat_channel.dart';
+import '../models/group_details.dart';
+import '../models/group_member.dart';
 import '../models/message.dart';
 import '../models/message_status.dart';
 import '../models/user.dart';
@@ -112,8 +114,18 @@ class ChatRepository {
                 )
                 .toList();
 
-      _storageService.saveChats(filtered);
-      return filtered;
+      final previous = _storageService.getChats();
+      final merged = filtered.map((remote) {
+        if (!remote.isGroup || remote.avatarUrl.isNotEmpty) return remote;
+        final idx = previous.indexWhere((c) => c.id == remote.id);
+        if (idx < 0) return remote;
+        final prev = previous[idx];
+        if (prev.avatarUrl.isEmpty) return remote;
+        return remote.copyWith(avatarUrl: prev.avatarUrl);
+      }).toList();
+
+      _storageService.saveChats(merged);
+      return merged;
     } on ApiException {
       rethrow;
     } catch (e) {
@@ -317,19 +329,16 @@ class ChatRepository {
         isForwarded: isForwarded,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: '',
-          attachmentUrl: '',
-          replyToMessageId: replyToMessageId,
-          isForwarded: isForwarded,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: '',
+        attachmentUrl: '',
+        replyToMessageId: replyToMessageId,
+        isForwarded: isForwarded,
+      );
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
       updateChannelLastMessage(channelId, text);
@@ -385,19 +394,15 @@ class ChatRepository {
         audioDuration: audioDuration,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          // Backend contract: "voice" for voice notes.
-          attachmentType: 'voice',
-          attachmentUrl: mediaUrl,
-          audioDuration: audioDuration,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'voice',
+        attachmentUrl: mediaUrl,
+        audioDuration: audioDuration,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -428,17 +433,14 @@ class ChatRepository {
         mediaUrl: mediaUrl,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          attachmentType: isSticker ? 'sticker' : 'gif',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: isSticker ? 'sticker' : 'gif',
+        attachmentUrl: mediaUrl,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -483,18 +485,15 @@ class ChatRepository {
         isViewOnce: isViewOnce,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'image',
-          attachmentUrl: mediaUrl,
-          isViewOnce: isViewOnce,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'image',
+        attachmentUrl: mediaUrl,
+        isViewOnce: isViewOnce,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -526,17 +525,14 @@ class ChatRepository {
         type: 'video',
       );
       final clientMsgId = 'msg_${DateTime.now().millisecondsSinceEpoch}_video';
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'video',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'video',
+        attachmentUrl: mediaUrl,
+      );
       final message = Message(
         id: clientMsgId,
         channelId: channelId,
@@ -667,18 +663,14 @@ class ChatRepository {
         documentFileSize: fileSize,
       );
 
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: message.id,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          // Keep body empty for file sends; renderer should use attachment fields.
-          body: '',
-          attachmentType: 'document',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: message.id,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'document',
+        attachmentUrl: mediaUrl,
+      );
 
       await _remoteDataSource.sendMessage(message);
       _persistMessage(message);
@@ -700,22 +692,18 @@ class ChatRepository {
       final attachmentType = _attachmentTypeForMessage(source);
       final attachmentUrl = source.mediaUrl ?? '';
       final body = source.text;
-      final peerUserId = _getPeerUserIdForChannel(channelId);
-
-      if (peerUserId != null) {
-        _sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: body,
-          attachmentType: attachmentType,
-          attachmentUrl: attachmentUrl,
-          audioDuration: source.isAudio ? source.audioDuration : null,
-          isViewOnce: source.isViewOnce,
-          replyToMessageId: source.replyToMessageId ?? '',
-          isForwarded: true,
-        );
-      }
+      _sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _getPeerUserIdForChannel(channelId),
+        body: body,
+        attachmentType: attachmentType,
+        attachmentUrl: attachmentUrl,
+        audioDuration: source.isAudio ? source.audioDuration : null,
+        isViewOnce: source.isViewOnce,
+        replyToMessageId: source.replyToMessageId ?? '',
+        isForwarded: true,
+      );
 
       final message = Message(
         id: clientMsgId,
@@ -830,7 +818,7 @@ class ChatRepository {
   void sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
@@ -1016,6 +1004,29 @@ class ChatRepository {
     // Re-sort to maintain order
     chats.sort((a, b) => b.lastMessageTime.compareTo(a.lastMessageTime));
     _storageService.saveChats(chats);
+  }
+
+  /// Updates stored group chat title/avatar so list + detail stay in sync after
+  /// group settings changes (local patch; next full [getChats] may replace from API).
+  void patchGroupChannelLocal({
+    required String groupId,
+    String? name,
+    String? avatarUrl,
+  }) {
+    if (name == null && avatarUrl == null) return;
+    final chats = _storageService.getChats();
+    var changed = false;
+    for (var i = 0; i < chats.length; i++) {
+      final c = chats[i];
+      if (c.groupId != groupId) continue;
+      final updated = c.copyWith(name: name, avatarUrl: avatarUrl);
+      if (updated == c) continue;
+      chats[i] = updated;
+      changed = true;
+    }
+    if (changed) {
+      _storageService.saveChats(chats);
+    }
   }
 
   void clearUnread(String channelId) {
@@ -1347,6 +1358,197 @@ class ChatRepository {
     }
   }
 
+  Future<ChatChannel> createGroup({
+    required String name,
+    String description = '',
+    String avatarUrl = '',
+    required List<String> memberIds,
+  }) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      final channel = await _remoteDataSource.createGroup(
+        token: token,
+        name: name,
+        description: description,
+        avatarUrl: avatarUrl,
+        memberIds: memberIds,
+      );
+
+      final chats = _storageService.getChats();
+      final idx = chats.indexWhere((c) => c.id == channel.id);
+      if (idx >= 0) {
+        chats[idx] = channel;
+      } else {
+        chats.insert(0, channel);
+      }
+      _storageService.saveChats(chats);
+      return channel;
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> getGroupDetails(String groupId) async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) {
+        throw const ApiException(
+          message: 'Your session has expired. Please sign in again.',
+          statusCode: 401,
+        );
+      }
+
+      return await _remoteDataSource.getGroupDetails(
+        token: token,
+        groupId: groupId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<GroupDetails> updateGroup({
+    required String groupId,
+    String? name,
+    String? description,
+    String? avatarUrl,
+  }) async {
+    final token = _requireToken();
+    try {
+      return await _remoteDataSource.updateGroup(
+        token: token,
+        groupId: groupId,
+        name: name,
+        description: description,
+        avatarUrl: avatarUrl,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> deleteGroup(String groupId) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.deleteGroup(token: token, groupId: groupId);
+      final chats = _storageService.getChats();
+      chats.removeWhere((c) => c.groupId == groupId);
+      _storageService.saveChats(chats);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<List<GroupMember>> listGroupMembers(String groupId) async {
+    final token = _requireToken();
+    try {
+      return await _remoteDataSource.listGroupMembers(
+        token: token,
+        groupId: groupId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> addGroupMembers({
+    required String groupId,
+    required List<String> userIds,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.addGroupMembers(
+        token: token,
+        groupId: groupId,
+        userIds: userIds,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> removeGroupMember({
+    required String groupId,
+    required String userId,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.removeGroupMember(
+        token: token,
+        groupId: groupId,
+        userId: userId,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> updateMemberRole({
+    required String groupId,
+    required String userId,
+    required String role,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.updateMemberRole(
+        token: token,
+        groupId: groupId,
+        userId: userId,
+        role: role,
+      );
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  Future<void> leaveGroup(String groupId) async {
+    final token = _requireToken();
+    try {
+      await _remoteDataSource.leaveGroup(token: token, groupId: groupId);
+      final chats = _storageService.getChats();
+      chats.removeWhere((c) => c.groupId == groupId);
+      _storageService.saveChats(chats);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
+  String _requireToken() {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return token;
+  }
+
   /// Opens a view-once message. Returns temporary image URL (valid 60 seconds).
   Future<ViewOnceOpenResult> openViewOnceMessage(String messageId) async {
     final token = _storageService.getToken();
@@ -1365,7 +1567,7 @@ class ChatRepository {
   void _sendMessageOverSocket({
     required String clientMsgId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String body,
     String attachmentType = '',
     String attachmentUrl = '',
@@ -1376,24 +1578,28 @@ class ChatRepository {
   }) {
     if (!_webSocketService.isConnected) return;
 
-    // Message envelope: event, data (object, never null), optional id, timestamp (Unix ms).
+    final data = <String, dynamic>{
+      'client_msg_id': clientMsgId,
+      'conversation_id': conversationId,
+      'body': body,
+      'attachment_type': attachmentType,
+      'attachment_url': attachmentUrl,
+      if (audioDuration != null) ...{
+        'audio_duration_ms': audioDuration.inMilliseconds,
+        'audio_duration': audioDuration.inSeconds,
+      },
+      'is_view_once': isViewOnce,
+      'reply_to_message_id': replyToMessageId,
+      'is_forwarded': isForwarded,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'send_message',
-      'data': <String, dynamic>{
-        'client_msg_id': clientMsgId,
-        'conversation_id': conversationId,
-        'peer_user_id': peerUserId,
-        'body': body,
-        'attachment_type': attachmentType,
-        'attachment_url': attachmentUrl,
-        if (audioDuration != null) ...{
-          'audio_duration_ms': audioDuration.inMilliseconds,
-          'audio_duration': audioDuration.inSeconds,
-        },
-        'is_view_once': isViewOnce,
-        'reply_to_message_id': replyToMessageId,
-        'is_forwarded': isForwarded,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
@@ -1451,18 +1657,23 @@ class ChatRepository {
     required String messageId,
     required String conversationId,
     required String bucket,
-    required String peerUserId,
+    String? peerUserId,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'bucket': bucket,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'delete_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'bucket': bucket,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
@@ -1475,19 +1686,24 @@ class ChatRepository {
     required String conversationId,
     required String bucket,
     required String body,
-    required String peerUserId,
+    String? peerUserId,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'bucket': bucket,
+      'body': body,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'edit_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'bucket': bucket,
-        'body': body,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 
@@ -1575,19 +1791,24 @@ class ChatRepository {
   void sendReactToMessage({
     required String messageId,
     required String conversationId,
-    required String peerUserId,
+    String? peerUserId,
     required String emoji,
   }) {
     if (!_webSocketService.isConnected) return;
 
+    final data = <String, dynamic>{
+      'message_id': messageId,
+      'conversation_id': conversationId,
+      'emoji': emoji,
+    };
+
+    if (peerUserId != null && peerUserId.isNotEmpty) {
+      data['peer_user_id'] = peerUserId;
+    }
+
     final envelope = <String, dynamic>{
       'event': 'react_to_message',
-      'data': <String, dynamic>{
-        'message_id': messageId,
-        'conversation_id': conversationId,
-        'emoji': emoji,
-        'peer_user_id': peerUserId,
-      },
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     };
 

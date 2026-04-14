@@ -555,10 +555,6 @@ class _ChatInputBarState extends State<ChatInputBar>
       // position in the linked TextField:
       textEditingController: _controller,
 
-      // Optional callbacks – you can hook analytics/metrics here.
-      onEmojiSelected: (category, emoji) {
-        setState(() => _isEmojiVisible = false);
-      },
       onBackspacePressed: () {
         // Backspace is also handled automatically for the controller.
       },

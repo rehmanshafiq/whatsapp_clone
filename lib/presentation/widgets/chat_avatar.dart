@@ -9,6 +9,7 @@ class ChatAvatar extends StatelessWidget {
   final String name;
   final double radius;
   final String? heroTag;
+  final bool isGroup;
 
   const ChatAvatar({
     super.key,
@@ -16,6 +17,7 @@ class ChatAvatar extends StatelessWidget {
     required this.name,
     this.radius = 26,
     this.heroTag,
+    this.isGroup = false,
   });
 
   @override
@@ -35,7 +37,7 @@ class ChatAvatar extends StatelessWidget {
           lowerUrl.startsWith('http://') || lowerUrl.startsWith('https://');
 
       if (!isHttpUrl) {
-        return _PlaceholderAvatar(name: name, radius: radius);
+        return _PlaceholderAvatar(name: name, radius: radius, isGroup: isGroup);
       }
 
       final isSvg = _isSvgPath(lowerUrl); // ← unified check
@@ -51,7 +53,7 @@ class ChatAvatar extends StatelessWidget {
               height: radius * 2,
               fit: BoxFit.cover,
               placeholderBuilder: (_) =>
-                  _PlaceholderAvatar(name: name, radius: radius),
+                  _PlaceholderAvatar(name: name, radius: radius, isGroup: isGroup),
             ),
           ),
         );
@@ -64,13 +66,13 @@ class ChatAvatar extends StatelessWidget {
           height: radius * 2,
           fit: BoxFit.cover,
           placeholder: (context, url) =>
-              _PlaceholderAvatar(name: name, radius: radius),
+              _PlaceholderAvatar(name: name, radius: radius, isGroup: isGroup),
           errorWidget: (context, url, error) =>
-              _PlaceholderAvatar(name: name, radius: radius),
+              _PlaceholderAvatar(name: name, radius: radius, isGroup: isGroup),
         ),
       );
     }
-    return _PlaceholderAvatar(name: name, radius: radius);
+    return _PlaceholderAvatar(name: name, radius: radius, isGroup: isGroup);
   }
 
   bool _isSvgPath(String lowerUrl) {
@@ -82,20 +84,46 @@ class ChatAvatar extends StatelessWidget {
 class _PlaceholderAvatar extends StatelessWidget {
   final String name;
   final double radius;
+  final bool isGroup;
 
-  const _PlaceholderAvatar({required this.name, required this.radius});
+  const _PlaceholderAvatar({
+    required this.name,
+    required this.radius,
+    this.isGroup = false,
+  });
+
+  String _initials() {
+    if (name.trim().isEmpty) return '?';
+    if (!isGroup) return name[0].toUpperCase();
+    final words = name.trim().split(RegExp(r'\s+'));
+    if (words.length >= 2) {
+      return '${words[0][0]}${words[1][0]}'.toUpperCase();
+    }
+    return words[0][0].toUpperCase();
+  }
 
   @override
   Widget build(BuildContext context) {
+    if (isGroup && name.trim().isEmpty) {
+      return CircleAvatar(
+        radius: radius,
+        backgroundColor: AppColors.divider,
+        child: Icon(
+          Icons.group,
+          color: AppColors.textPrimary,
+          size: radius * 0.85,
+        ),
+      );
+    }
     return CircleAvatar(
       radius: radius,
       backgroundColor: AppColors.divider,
       child: Text(
-        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        _initials(),
         style: TextStyle(
           color: AppColors.textPrimary,
           fontWeight: FontWeight.bold,
-          fontSize: radius * 0.75,
+          fontSize: radius * (isGroup && _initials().length > 1 ? 0.55 : 0.75),
         ),
       ),
     );

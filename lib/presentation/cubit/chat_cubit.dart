@@ -12,6 +12,7 @@ import 'package:geolocator/geolocator.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
+import '../../core/utils/document_attachment_filename.dart';
 import '../../data/models/chat_channel.dart';
 import '../../data/models/message.dart';
 import '../../data/models/message_status.dart';
@@ -79,6 +80,31 @@ class ChatCubit extends Cubit<ChatState> {
     } catch (_) {
       // Silent fail for background refresh
     }
+  }
+
+  /// Keeps the chat list and open chat app bar in sync after group name/avatar
+  /// changes (Group Info screen or WebSocket `group_updated`).
+  void applyGroupChannelPatch({
+    required String groupId,
+    String? name,
+    String? avatarUrl,
+  }) {
+    if (isClosed) return;
+    if (name == null && avatarUrl == null) return;
+    _repository.patchGroupChannelLocal(
+      groupId: groupId,
+      name: name,
+      avatarUrl: avatarUrl,
+    );
+    final updatedChannels = state.channels.map((c) {
+      if (c.groupId != groupId) return c;
+      return c.copyWith(name: name, avatarUrl: avatarUrl);
+    }).toList();
+    ChatChannel? selected = state.selectedChannel;
+    if (selected?.groupId == groupId) {
+      selected = selected!.copyWith(name: name, avatarUrl: avatarUrl);
+    }
+    emit(state.copyWith(channels: updatedChannels, selectedChannel: selected));
   }
 
   Future<UserSearchResult?> updateCurrentUserProfile({
@@ -594,6 +620,19 @@ class ChatCubit extends Cubit<ChatState> {
     _refreshChannelList();
   }
 
+  void _handleGroupUpdated(Map<String, dynamic> raw) {
+    if (isClosed) return;
+    final data = raw['data'];
+    if (data is! Map<String, dynamic>) return;
+    final groupId = _stringFrom(data['group_id']);
+    if (groupId == null || groupId.isEmpty) return;
+    applyGroupChannelPatch(
+      groupId: groupId,
+      name: _stringFrom(data['name']),
+      avatarUrl: _stringFrom(data['avatar_url']),
+    );
+  }
+
   void _handleSocketMessage(dynamic event) {
     debugPrint('[ChatCubit] _handleSocketMessage called (isClosed=$isClosed)');
     if (isClosed) return;
@@ -623,6 +662,10 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
+    if (eventType == 'group_updated') {
+      _handleGroupUpdated(raw);
+      return;
+    }
     if (eventType == 'typing_indicator' ||
         eventType == 'typing_start' ||
         eventType == 'typing_stop') {
@@ -954,6 +997,28 @@ class ChatCubit extends Cubit<ChatState> {
                 : null)
           : null;
 
+      // Document metadata — the API stores the filename in `body` for documents.
+      String? docFileName =
+          _stringFrom(data['file_name']) ??
+          _stringFrom(data['document_name']) ??
+          _stringFrom(data['attachment_name']) ??
+          _stringFrom(data['documentFileName']);
+      if (docFileName == null && resolvedType == MessageType.document) {
+        final bodyText = _stringFrom(data['body']) ??
+            _stringFrom(data['message']) ??
+            _stringFrom(data['text']);
+        if (bodyText != null && bodyText.contains('.')) {
+          docFileName = bodyText;
+        } else if (resolvedMediaUrl != null && resolvedMediaUrl.isNotEmpty) {
+          docFileName =
+              deriveDocumentFileNameFromAttachmentUrl(resolvedMediaUrl);
+        }
+      }
+      final docFileSize =
+          _intFrom(data['file_size']) ??
+          _intFrom(data['document_size']) ??
+          _intFrom(data['attachment_size']);
+
       final message = Message(
         id:
             (isOutgoing
@@ -966,6 +1031,10 @@ class ChatCubit extends Cubit<ChatState> {
             'msg_socket_${DateTime.now().millisecondsSinceEpoch}',
         channelId: conversationId,
         senderId: normalizedSenderId,
+        senderName: _stringFrom(data['sender_display_name']) ??
+            _stringFrom(data['sender_name']) ??
+            _stringFrom(data['display_name']) ??
+            _stringFrom(data['username']),
         text: messageText,
         timestamp: timestamp,
         status: MessageStatus.sent,
@@ -974,6 +1043,8 @@ class ChatCubit extends Cubit<ChatState> {
         audioDuration: resolvedType == MessageType.audio
             ? _parseAudioDurationFromPayload(data)
             : null,
+        documentFileName: docFileName,
+        documentFileSize: docFileSize,
         isViewOnce: isViewOnce,
         viewOnceOpenedAt: viewOnceOpenedAt,
         replyToMessageId: replyToMessageId,
@@ -1454,20 +1525,15 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: '',
-          attachmentType: 'voice',
-          attachmentUrl: mediaUrl,
-          audioDuration: audioDuration,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: '',
+        attachmentType: 'voice',
+        attachmentUrl: mediaUrl,
+        audioDuration: audioDuration,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: audioPath,
@@ -1565,20 +1631,15 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'image',
-          attachmentUrl: mediaUrl,
-          isViewOnce: isViewOnce,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'image',
+        attachmentUrl: mediaUrl,
+        isViewOnce: isViewOnce,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: imagePath,
@@ -1713,19 +1774,14 @@ class ChatCubit extends Cubit<ChatState> {
         isUploading: false,
       );
 
-      // Send over WebSocket (backend creates the message; message_sent_ack
-      // will replace clientMsgId with the server-assigned id).
-      final peerUserId = _repository.getPeerUserIdForChannel(channelId);
-      if (peerUserId != null) {
-        _repository.sendMessageOverSocket(
-          clientMsgId: clientMsgId,
-          conversationId: channelId,
-          peerUserId: peerUserId,
-          body: text,
-          attachmentType: 'video',
-          attachmentUrl: mediaUrl,
-        );
-      }
+      _repository.sendMessageOverSocket(
+        clientMsgId: clientMsgId,
+        conversationId: channelId,
+        peerUserId: _repository.getPeerUserIdForChannel(channelId),
+        body: text,
+        attachmentType: 'video',
+        attachmentUrl: mediaUrl,
+      );
 
       final finalMessage = sent.copyWith(
         localFilePath: videoPath,
@@ -2097,15 +2153,12 @@ class ChatCubit extends Cubit<ChatState> {
       emoji: nextEmoji,
     );
 
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      _repository.sendReactToMessage(
-        messageId: messageId,
-        conversationId: message.channelId,
-        emoji: nextEmoji,
-        peerUserId: peerUserId,
-      );
-    }
+    _repository.sendReactToMessage(
+      messageId: messageId,
+      conversationId: message.channelId,
+      emoji: nextEmoji,
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
   }
 
   void removeReaction(String messageId, String emoji) {
@@ -2124,15 +2177,12 @@ class ChatCubit extends Cubit<ChatState> {
       emoji: '',
     );
 
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      _repository.sendReactToMessage(
-        messageId: messageId,
-        conversationId: message.channelId,
-        emoji: '',
-        peerUserId: peerUserId,
-      );
-    }
+    _repository.sendReactToMessage(
+      messageId: messageId,
+      conversationId: message.channelId,
+      emoji: '',
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
   }
 
   String? _emojiForUser({
@@ -2212,16 +2262,13 @@ class ChatCubit extends Cubit<ChatState> {
   /// Deletes one of the current user's sent messages (soft delete).
   Future<void> deleteMessage(Message message) async {
     if (!message.isOutgoing) return;
-    final peerUserId = _resolvePeerUserIdForChannel(message.channelId);
-    if (peerUserId != null && peerUserId.isNotEmpty) {
-      final bucket = _bucketFromTimestamp(message.timestamp);
-      _repository.sendDeleteMessage(
-        messageId: message.id,
-        conversationId: message.channelId,
-        bucket: bucket,
-        peerUserId: peerUserId,
-      );
-    }
+    final bucket = _bucketFromTimestamp(message.timestamp);
+    _repository.sendDeleteMessage(
+      messageId: message.id,
+      conversationId: message.channelId,
+      bucket: bucket,
+      peerUserId: _resolvePeerUserIdForChannel(message.channelId),
+    );
 
     final deleted = message.copyWith(
       text: 'message deleted',
@@ -2314,6 +2361,31 @@ class ChatCubit extends Cubit<ChatState> {
     emit(state.copyWith(channels: updated));
   }
 
+  /// Syncs in-memory chat list after [ChatRepository.leaveGroup] or
+  /// [ChatRepository.deleteGroup] (storage is already updated there).
+  void removeChannelsForGroup(String groupId) {
+    if (isClosed || groupId.isEmpty) return;
+    final channels =
+        state.channels.where((c) => c.groupId != groupId).toList();
+    final dropOpenChat = state.selectedChannel?.groupId == groupId;
+    if (dropOpenChat) {
+      emit(
+        state.copyWith(
+          channels: channels,
+          clearSelectedChannel: true,
+          clearReplyingTo: true,
+          messages: const <Message>[],
+          isTyping: false,
+          isRecordingAudio: false,
+          isOnline: false,
+          hasLoadedMessages: false,
+        ),
+      );
+    } else {
+      emit(state.copyWith(channels: channels));
+    }
+  }
+
   Future<String> openOrCreateChat(User contact) async {
     final channel = _repository.createChat(contact);
     final updatedChats = await _repository.getChats();
@@ -2352,6 +2424,14 @@ class ChatCubit extends Cubit<ChatState> {
     if (v == null) return null;
     if (v is String) return v.isEmpty ? null : v;
     return v.toString();
+  }
+
+  static int? _intFrom(dynamic v) {
+    if (v == null) return null;
+    if (v is int) return v;
+    if (v is num) return v.toInt();
+    if (v is String) return int.tryParse(v);
+    return null;
   }
 
   static Duration? _parseAudioDurationFromPayload(Map<String, dynamic> data) {

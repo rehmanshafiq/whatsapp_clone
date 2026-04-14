@@ -18,6 +18,10 @@ class ChatChannel extends Equatable {
   final DateTime? lastSeen;
   /// Whether the current user has muted this conversation.
   final bool isMuted;
+  /// Whether this conversation is a group chat.
+  final bool isGroup;
+  /// The group's unique id (needed for group management APIs). Null for 1:1.
+  final String? groupId;
 
   const ChatChannel({
     required this.id,
@@ -32,6 +36,8 @@ class ChatChannel extends Equatable {
     this.peerUserId,
     this.lastSeen,
     this.isMuted = false,
+    this.isGroup = false,
+    this.groupId,
   });
 
   ChatChannel copyWith({
@@ -47,6 +53,8 @@ class ChatChannel extends Equatable {
     String? peerUserId,
     DateTime? lastSeen,
     bool? isMuted,
+    bool? isGroup,
+    String? groupId,
   }) {
     return ChatChannel(
       id: id ?? this.id,
@@ -61,6 +69,8 @@ class ChatChannel extends Equatable {
       peerUserId: peerUserId ?? this.peerUserId,
       lastSeen: lastSeen ?? this.lastSeen,
       isMuted: isMuted ?? this.isMuted,
+      isGroup: isGroup ?? this.isGroup,
+      groupId: groupId ?? this.groupId,
     );
   }
 
@@ -77,6 +87,8 @@ class ChatChannel extends Equatable {
         'peerUserId': peerUserId,
         'lastSeen': lastSeen?.toIso8601String(),
         'isMuted': isMuted,
+        'isGroup': isGroup,
+        'groupId': groupId,
       };
 
   factory ChatChannel.fromJson(Map<String, dynamic> json) => ChatChannel(
@@ -102,6 +114,8 @@ class ChatChannel extends Equatable {
             json['isMuted'] as bool? ??
             json['is_muted'] as bool? ??
             false,
+        isGroup: json['isGroup'] as bool? ?? false,
+        groupId: json['groupId'] as String?,
       );
 
   @override
@@ -118,5 +132,7 @@ class ChatChannel extends Equatable {
         peerUserId,
         lastSeen,
         isMuted,
+        isGroup,
+        groupId,
       ];
 }
