@@ -132,9 +132,12 @@ class WebRtcCallManager extends ChangeNotifier {
     _role = _CallRole.callee;
     _callId = callId;
     _peerUserId = callerId;
-    _peerDisplayName =
-        _string(data['caller_display_name']) ?? 'Unknown';
-    _peerAvatarUrl = _resolveAvatarUrl(_string(data['caller_avatar_url']));
+    _peerDisplayName = _string(data['caller_name']) ??
+        _string(data['caller_display_name']) ??
+        'Unknown';
+    _peerAvatarUrl = _resolveAvatarUrl(
+      _string(data['caller_avatar']) ?? _string(data['caller_avatar_url']),
+    );
     _isVideo = _string(data['call_type']) == 'video';
     _phase = CallSessionPhase.ringingIn;
     notifyListeners();
@@ -203,9 +206,7 @@ class WebRtcCallManager extends ChangeNotifier {
   Future<void> onWebRtcOffer(Map<String, dynamic> data) async {
     if (_role != _CallRole.callee) return;
     final fromPeer = _string(data['peer_user_id']);
-    if (fromPeer != null &&
-        _peerUserId != null &&
-        fromPeer != _peerUserId) {
+    if (!_signalingPeerMatches(fromPeer)) {
       debugPrint('[WebRtcCallManager] Ignoring webrtc_offer from $fromPeer');
       return;
     }
@@ -232,9 +233,7 @@ class WebRtcCallManager extends ChangeNotifier {
   Future<void> onWebRtcAnswer(Map<String, dynamic> data) async {
     if (_role != _CallRole.caller) return;
     final fromPeer = _string(data['peer_user_id']);
-    if (fromPeer != null &&
-        _peerUserId != null &&
-        fromPeer != _peerUserId) {
+    if (!_signalingPeerMatches(fromPeer)) {
       debugPrint('[WebRtcCallManager] Ignoring webrtc_answer from $fromPeer');
       return;
     }
@@ -251,16 +250,9 @@ class WebRtcCallManager extends ChangeNotifier {
   }
 
   Future<void> onRemoteIceCandidate(Map<String, dynamic> data) async {
-    // Relay may set peer_user_id to the other party or to the local user (target).
     final peer = _string(data['peer_user_id']);
-    final myId = _repo.getCurrentUserId();
-    final partnerId = _peerUserId;
-    if (peer != null && partnerId != null) {
-      final forThisCall =
-          peer == partnerId || (myId != null && peer == myId);
-      if (!forThisCall) {
-        return;
-      }
+    if (!_signalingPeerMatches(peer)) {
+      return;
     }
     final raw = data['candidate'];
     if (raw is! Map) return;
@@ -322,6 +314,15 @@ class WebRtcCallManager extends ChangeNotifier {
   }
 
   // --- Internals ---
+
+  /// Backend may set [peer_user_id] to the remote party or to the local user
+  /// (envelope target). Match [onRemoteIceCandidate] behavior.
+  bool _signalingPeerMatches(String? peerField) {
+    if (peerField == null || _peerUserId == null) return true;
+    final myId = _repo.getCurrentUserId();
+    return peerField == _peerUserId ||
+        (myId != null && peerField == myId);
+  }
 
   void _armRingTimeout() {
     _ringTimeout?.cancel();
