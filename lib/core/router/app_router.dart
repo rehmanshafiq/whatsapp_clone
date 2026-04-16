@@ -3,7 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../data/repository/auth_repository.dart';
 import '../../presentation/screens/chat_detail_screen.dart';
-import '../../presentation/screens/chat_list_screen.dart';
+import '../../presentation/screens/main_screen.dart';
 import '../../presentation/screens/group_info_screen.dart';
 import '../../presentation/screens/select_contact_screen.dart';
 import '../../presentation/screens/responsive_shell.dart';
@@ -46,7 +46,7 @@ class AppRouter {
               path: '/chats',
               name: chats,
               pageBuilder: (context, state) =>
-                  const NoTransitionPage(child: ChatListScreen()),
+                  const NoTransitionPage(child: MainScreen()),
               routes: [
                 GoRoute(
                   path: ':id',
