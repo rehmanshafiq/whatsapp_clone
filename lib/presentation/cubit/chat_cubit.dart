@@ -1214,8 +1214,19 @@ class ChatCubit extends Cubit<ChatState> {
     if (conversationId == null) return;
 
     final peerUserId = _stringFrom(data['peer_user_id']);
-    final peerDisplayName = _stringFrom(data['peer_display_name']) ?? 'Unknown';
+    final titleFromPayload = _conversationTitleFromUpsertData(data);
+    final isGroupUpsert = _isGroupConversationUpsert(data);
+
     var peerAvatarUrl = _stringFrom(data['peer_avatar_url']) ?? '';
+    final groupMap = data['group'] is Map<String, dynamic>
+        ? data['group'] as Map<String, dynamic>
+        : null;
+    if (peerAvatarUrl.isEmpty && groupMap != null) {
+      peerAvatarUrl = _stringFrom(groupMap['avatar_url']) ??
+          _stringFrom(groupMap['photo_url']) ??
+          _stringFrom(groupMap['avatar']) ??
+          '';
+    }
     if (peerAvatarUrl.isNotEmpty && !peerAvatarUrl.startsWith('http')) {
       peerAvatarUrl = '${AppConstants.apiBaseUrl}$peerAvatarUrl';
     }
@@ -1260,21 +1271,53 @@ class ChatCubit extends Cubit<ChatState> {
 
     ChatChannel updated;
     if (idx != -1) {
-      updated = channels[idx].copyWith(
-        name: peerDisplayName,
-        avatarUrl: peerAvatarUrl,
+      final existing = channels[idx];
+      final isGroup = existing.isGroup || isGroupUpsert;
+
+      // Group upserts often omit peer_display_name; never replace the real group
+      // title with the 'Unknown' 1:1 fallback (matches REST _mapConversationToChannel).
+      final String nextName;
+      if (isGroup) {
+        nextName = (titleFromPayload != null && titleFromPayload.isNotEmpty)
+            ? titleFromPayload
+            : existing.name;
+      } else {
+        nextName = titleFromPayload ??
+            _stringFrom(data['peer_display_name']) ??
+            'Unknown';
+      }
+
+      var nextAvatarUrl = peerAvatarUrl;
+      if (isGroup && nextAvatarUrl.isEmpty) {
+        nextAvatarUrl = existing.avatarUrl;
+      }
+
+      final nextGroupId = _stringFrom(data['group_id']) ?? existing.groupId;
+
+      updated = existing.copyWith(
+        name: nextName,
+        avatarUrl: nextAvatarUrl,
         lastMessage: lastMessageText,
         lastMessageTime: timestamp,
         lastMessageStatus: lastMessageStatus,
         lastMessageSenderId: lastMessageSender,
         unreadCount: unreadCount,
         peerUserId: peerUserId,
+        isGroup: isGroup,
+        groupId: nextGroupId,
       );
       channels[idx] = updated;
     } else {
+      final isGroup = isGroupUpsert;
+      final nextName = isGroup
+          ? (titleFromPayload ?? 'Group')
+          : (titleFromPayload ??
+              _stringFrom(data['peer_display_name']) ??
+              'Unknown');
+
       updated = ChatChannel(
         id: conversationId,
-        name: peerDisplayName,
+        name: nextName,
         avatarUrl: peerAvatarUrl,
         lastMessage: lastMessageText,
         lastMessageTime: timestamp,
@@ -1282,6 +1325,8 @@ class ChatCubit extends Cubit<ChatState> {
         lastMessageSenderId: lastMessageSender,
         unreadCount: unreadCount,
         peerUserId: peerUserId,
+        isGroup: isGroup,
+        groupId: _stringFrom(data['group_id']),
       );
       channels.insert(0, updated);
     }
@@ -2424,6 +2469,28 @@ class ChatCubit extends Cubit<ChatState> {
     if (v == null) return null;
     if (v is String) return v.isEmpty ? null : v;
     return v.toString();
+  }
+
+  /// Same title keys as [ChatRemoteDataSource._mapConversationToChannel] so
+  /// WebSocket `conversation_upserted` does not clobber group names.
+  static String? _conversationTitleFromUpsertData(Map<String, dynamic> data) {
+    final groupMap = data['group'] is Map<String, dynamic>
+        ? data['group'] as Map<String, dynamic>
+        : null;
+    return _stringFrom(data['peer_display_name']) ??
+        _stringFrom(data['name']) ??
+        _stringFrom(data['title']) ??
+        _stringFrom(data['group_name']) ??
+        (groupMap != null ? _stringFrom(groupMap['name']) : null) ??
+        _stringFrom(data['display_name']);
+  }
+
+  static bool _isGroupConversationUpsert(Map<String, dynamic> data) {
+    if (data['is_group'] == true) return true;
+    final t = _stringFrom(data['type']);
+    if (t != null && t.toLowerCase() == 'group') return true;
+    final gid = _stringFrom(data['group_id']);
+    return gid != null && gid.isNotEmpty;
   }
 
   static int? _intFrom(dynamic v) {

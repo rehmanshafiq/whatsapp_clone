@@ -25,7 +25,10 @@ class ChatListItem extends StatelessWidget {
   }
 
   String _displayName() {
-    if (channel.name.trim().isNotEmpty) return _capitalizeName(channel.name);
+    final raw = channel.name.trim();
+    // Stale state: some WS payloads used peer fallbacks and overwrote group titles.
+    if (channel.isGroup && raw == 'Unknown') return 'Group';
+    if (raw.isNotEmpty) return _capitalizeName(channel.name);
     if (channel.isGroup) return 'Group';
     return 'Chat';
   }
