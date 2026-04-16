@@ -1422,6 +1422,50 @@ class ChatRemoteDataSource {
     }
   }
 
+  /// ICE / TURN credentials for WebRTC (Metered.ca / OpenRelay fallback).
+  ///
+  /// GET /api/v1/chat/turn-credentials — response includes `ice_servers`
+  /// (pass as `iceServers` to the peer connection), `ttl` (seconds, refresh
+  /// before expiry), and `provider` (`metered` | `openrelay`).
+  Future<dynamic> fetchTurnCredentials({required String token}) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/turn-credentials',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+      final raw = response.data;
+      if (raw is String) {
+        return json.decode(raw);
+      }
+      return raw;
+    } on DioException catch (e) {
+      if (e.response?.statusCode == 404) {
+        try {
+          final r2 = await _dio.get<dynamic>(
+            '/chat/turn-credentials',
+            options: Options(
+              headers: <String, String>{
+                'authorization': 'Bearer $token',
+                'x-api-key': _apiKey,
+              },
+            ),
+          );
+          final raw = r2.data;
+          if (raw is String) return json.decode(raw);
+          return raw;
+        } catch (_) {
+          rethrow;
+        }
+      }
+      rethrow;
+    }
+  }
+
   /// Returns call history for the authenticated user (most recent first).
   /// GET /api/v1/chat/calls
   Future<List<CallLog>> fetchCallHistory({

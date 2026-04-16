@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
+
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../local/storage_service.dart';
@@ -32,6 +34,22 @@ class ChatRepository {
   );
 
   Stream<dynamic> get socketMessages => _webSocketService.messagesStream;
+
+  bool get isRealtimeConnected => _webSocketService.isConnected;
+
+  /// Ensures the realtime WebSocket is up (e.g. before [sendCallInitiate]).
+  /// Call list load usually connects; this covers cold-open chat / reconnect gaps.
+  Future<void> ensureRealtimeSocketConnected() async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) return;
+    if (_webSocketService.isConnected) return;
+    try {
+      await _webSocketService.connect(token: token);
+      debugPrint('[ChatRepository] WebSocket connected for realtime');
+    } catch (e) {
+      debugPrint('[ChatRepository] WebSocket connect failed: $e');
+    }
+  }
 
   /// Current user's id from backend (stored at login). Used to normalize
   /// message senderId so UI can show sent (right) vs received (left).
@@ -1245,6 +1263,17 @@ class ChatRepository {
     return _remoteDataSource.fetchBlockedUsers(token: token);
   }
 
+  /// Raw TURN/STUN payload for WebRTC. Returns null if the request fails.
+  Future<dynamic> fetchTurnCredentialsPayload() async {
+    try {
+      final token = _storageService.getToken();
+      if (token == null || token.isEmpty) return null;
+      return await _remoteDataSource.fetchTurnCredentials(token: token);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<List<CallLog>> fetchCallHistory() async {
     final token = _storageService.getToken();
     if (token == null || token.isEmpty) {
@@ -1828,5 +1857,142 @@ class ChatRepository {
     };
 
     _webSocketService.send(envelope);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Voice / video calls (WebSocket). Deferred SDP: do not send webrtc_offer
+  // with call_initiate; offer only after call_answered.
+  // ---------------------------------------------------------------------------
+
+  /// Starts a voice or video call with a 1:1 peer.
+  ///
+  /// [conversationId] is included when non-empty so the backend can route the
+  /// same way as [send_message] (required by some servers for `incoming_call`).
+  Future<bool> sendCallInitiate({
+    required String peerUserId,
+    required String callType,
+    String? conversationId,
+  }) async {
+    await ensureRealtimeSocketConnected();
+    if (!_webSocketService.isConnected) {
+      debugPrint(
+        '[ChatRepository] sendCallInitiate: still not connected, aborting',
+      );
+      return false;
+    }
+
+    final normalized = callType.toLowerCase();
+    final type = normalized == 'video' ? 'video' : 'voice';
+
+    // Snake_case matches API docs; camelCase mirrors help some web clients / gateways.
+    final data = <String, dynamic>{
+      'peer_user_id': peerUserId,
+      'call_type': type,
+      'peerUserId': peerUserId,
+      'callType': type,
+    };
+    final trimmedConv = conversationId?.trim() ?? '';
+    if (trimmedConv.isNotEmpty) {
+      data['conversation_id'] = trimmedConv;
+      data['conversationId'] = trimmedConv;
+    }
+
+    final envelope = <String, dynamic>{
+      'event': 'call_initiate',
+      'data': data,
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    };
+
+    _webSocketService.send(envelope);
+    debugPrint(
+      '[ChatRepository] call_initiate → callee must match logged-in user on web. '
+      'peer_user_id=$peerUserId conv=$trimmedConv type=$type',
+    );
+    return true;
+  }
+
+  void sendCallAnswer({required String callId}) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'call_answer',
+      'data': <String, dynamic>{'call_id': callId},
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  /// [reason]: `rejected`, `busy`, or `timeout`.
+  void sendCallReject({
+    required String callId,
+    required String reason,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'call_reject',
+      'data': <String, dynamic>{
+        'call_id': callId,
+        'reason': reason,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  void sendCallEnd({required String callId}) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'call_end',
+      'data': <String, dynamic>{'call_id': callId},
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  void sendWebRtcOffer({
+    required String peerUserId,
+    required String sdp,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'webrtc_offer',
+      'data': <String, dynamic>{
+        'peer_user_id': peerUserId,
+        'sdp': sdp,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  void sendWebRtcAnswer({
+    required String peerUserId,
+    required String sdp,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'webrtc_answer',
+      'data': <String, dynamic>{
+        'peer_user_id': peerUserId,
+        'sdp': sdp,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
+  }
+
+  void sendIceCandidate({
+    required String peerUserId,
+    required Map<String, dynamic> candidate,
+  }) {
+    if (!_webSocketService.isConnected) return;
+
+    _webSocketService.send(<String, dynamic>{
+      'event': 'ice_candidate',
+      'data': <String, dynamic>{
+        'peer_user_id': peerUserId,
+        'candidate': candidate,
+      },
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 }

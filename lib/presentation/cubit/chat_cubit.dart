@@ -19,10 +19,12 @@ import '../../data/models/message_status.dart';
 import '../../data/models/user.dart';
 import '../../data/models/user_search.dart';
 import '../../data/repository/chat_repository.dart';
+import '../../data/services/webrtc_call_manager.dart';
 import 'chat_state.dart';
 
 class ChatCubit extends Cubit<ChatState> {
   final ChatRepository _repository;
+  final WebRtcCallManager _callManager;
   final Map<String, List<Timer>> _statusTimers = {};
   final Map<String, Timer> _liveLocationTimers = {};
   StreamSubscription<dynamic>? _socketSubscription;
@@ -31,7 +33,7 @@ class ChatCubit extends Cubit<ChatState> {
   Map<String, String>? get authHeadersForMedia =>
       _repository.getAuthHeadersForMedia();
 
-  ChatCubit(this._repository) : super(const ChatState()) {
+  ChatCubit(this._repository, this._callManager) : super(const ChatState()) {
     _socketSubscription = _repository.socketMessages.listen(
       _handleSocketMessage,
       onError: (Object e, StackTrace st) {
@@ -42,6 +44,23 @@ class ChatCubit extends Cubit<ChatState> {
     debugPrint('[ChatCubit] Subscribed to socket stream');
   }
   ChatRepository get repository => _repository;
+
+  /// Starts a 1:1 WebRTC call (voice or video). Requires mic (and camera for video) permission first.
+  Future<void> startVoiceOrVideoCall({
+    required String conversationId,
+    required String peerUserId,
+    required String peerDisplayName,
+    String? peerAvatarUrl,
+    required bool isVideo,
+  }) async {
+    await _callManager.startOutgoingCall(
+      peerUserId: peerUserId,
+      peerDisplayName: peerDisplayName,
+      peerAvatarUrl: peerAvatarUrl,
+      isVideo: isVideo,
+      conversationId: conversationId,
+    );
+  }
 
   Future<void> loadCurrentUserProfile() async {
     try {
@@ -620,6 +639,68 @@ class ChatCubit extends Cubit<ChatState> {
     _refreshChannelList();
   }
 
+  bool _handleCallSignalingEvent(
+    String? eventType,
+    Map<String, dynamic> raw,
+  ) {
+    const signaling = <String>{
+      'incoming_call',
+      'call_answered',
+      'call_rejected',
+      'call_ended',
+      'webrtc_offer',
+      'webrtc_answer',
+      'ice_candidate',
+      'call_ringing',
+      'call_outgoing',
+      'outgoing_call',
+      'call_progress',
+    };
+    if (eventType == null || !signaling.contains(eventType)) return false;
+
+    final data = raw['data'];
+    final Map<String, dynamic>? map = data is Map<String, dynamic>
+        ? data
+        : data is Map
+        ? Map<String, dynamic>.from(data)
+        : null;
+    if (map == null) return true;
+
+    switch (eventType) {
+      case 'incoming_call':
+        unawaited(_callManager.onIncomingCall(map));
+        break;
+      case 'call_answered':
+        unawaited(_callManager.onCallAnswered(map));
+        break;
+      case 'call_rejected':
+        _callManager.onCallRejected(map);
+        break;
+      case 'call_ended':
+        _callManager.onCallEnded(map);
+        break;
+      case 'webrtc_offer':
+        unawaited(_callManager.onWebRtcOffer(map));
+        break;
+      case 'webrtc_answer':
+        unawaited(_callManager.onWebRtcAnswer(map));
+        break;
+      case 'ice_candidate':
+        unawaited(_callManager.onRemoteIceCandidate(map));
+        break;
+      case 'call_ringing':
+      case 'call_outgoing':
+      case 'outgoing_call':
+      case 'call_progress':
+        final id = _stringFrom(map['call_id']);
+        if (id != null) _callManager.noteOutgoingCallId(id);
+        break;
+      default:
+        break;
+    }
+    return true;
+  }
+
   void _handleGroupUpdated(Map<String, dynamic> raw) {
     if (isClosed) return;
     final data = raw['data'];
@@ -662,6 +743,7 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
+    if (_handleCallSignalingEvent(eventType, raw)) return;
     if (eventType == 'group_updated') {
       _handleGroupUpdated(raw);
       return;

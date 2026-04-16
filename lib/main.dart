@@ -4,10 +4,13 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:get_storage/get_storage.dart';
 
 import 'core/di/service_locator.dart';
+import 'core/root_scaffold_messenger.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repository/auth_repository.dart';
+import 'data/services/webrtc_call_manager.dart';
 import 'presentation/cubit/chat_cubit.dart';
+import 'presentation/widgets/active_call_overlay.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -56,8 +59,29 @@ class _WhatsAppCloneState extends State<WhatsAppClone>
       child: MaterialApp.router(
         title: 'WhatsApp Clone',
         debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: rootScaffoldMessengerKey,
         theme: AppTheme.dark,
         routerConfig: AppRouter.create(_authRepository),
+        builder: (context, child) {
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              child ?? const SizedBox.shrink(),
+              ListenableBuilder(
+                listenable: getIt<WebRtcCallManager>(),
+                builder: (context, _) {
+                  final manager = getIt<WebRtcCallManager>();
+                  if (!manager.hasActiveCall) {
+                    return const SizedBox.shrink();
+                  }
+                  return Positioned.fill(
+                    child: ActiveCallOverlay(manager: manager),
+                  );
+                },
+              ),
+            ],
+          );
+        },
       ),
     );
   }

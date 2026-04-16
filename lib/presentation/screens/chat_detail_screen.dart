@@ -2,12 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:flutter_chat_reactions/flutter_chat_reactions.dart';
 import 'package:go_router/go_router.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import '../../core/constants/app_constants.dart';
 import '../../core/di/service_locator.dart';
 import '../../core/router/app_router.dart';
 import '../../core/theme/app_theme.dart';
 import '../../data/local/audio_playback_service.dart';
+import '../../data/models/chat_channel.dart';
 import '../../data/models/message.dart';
 import '../cubit/chat_cubit.dart';
 import '../cubit/chat_state.dart';
@@ -318,6 +320,67 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
   // Formatting helpers
   // ------------------------------------------------------------------
 
+  bool _canStartCall(ChatChannel? channel, String? peerUserId) {
+    if (channel?.isGroup == true) return false;
+    return peerUserId != null && peerUserId.isNotEmpty;
+  }
+
+  Future<void> _startCall(
+    BuildContext context,
+    ChatState state, {
+    required bool video,
+  }) async {
+    final cubit = context.read<ChatCubit>();
+    final peerId = cubit.repository.getPeerUserIdForChannel(widget.channelId);
+    if (peerId == null || peerId.isEmpty) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Cannot place a call in this chat.')),
+      );
+      return;
+    }
+
+    final mic = await Permission.microphone.request();
+    if (!mic.isGranted) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Microphone permission is required to call.'),
+          ),
+        );
+      }
+      return;
+    }
+
+    if (video) {
+      final cam = await Permission.camera.request();
+      if (!cam.isGranted) {
+        if (context.mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Camera permission is required for video calls.'),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    final channel = state.channels
+            .where((c) => c.id == widget.channelId)
+            .firstOrNull ??
+        state.selectedChannel;
+
+    if (!context.mounted) return;
+    await cubit.startVoiceOrVideoCall(
+      conversationId: widget.channelId,
+      peerUserId: peerId,
+      peerDisplayName: _displayName(channel?.name),
+      peerAvatarUrl: channel?.avatarUrl,
+      isVideo: video,
+    );
+  }
+
   String _formatLastSeen(DateTime? lastSeen) {
     if (lastSeen == null) return 'last seen recently';
     final local = lastSeen.isUtc ? lastSeen.toLocal() : lastSeen;
@@ -552,6 +615,9 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
       builder: (context, state) {
         final channel = state.selectedChannel;
         final cubit = context.read<ChatCubit>();
+        final peerUserId = cubit.repository.getPeerUserIdForChannel(
+          widget.channelId,
+        );
 
         final channelIsOnline =
             state.channels
@@ -700,6 +766,20 @@ class _ChatDetailScreenState extends State<ChatDetailScreen> {
                 ],
               ),
             ),
+              actions: [
+                if (_canStartCall(channel, peerUserId))
+                  IconButton(
+                    tooltip: 'Voice call',
+                    icon: const Icon(Icons.call, color: AppColors.accent),
+                    onPressed: () => _startCall(context, state, video: false),
+                  ),
+                if (_canStartCall(channel, peerUserId))
+                  IconButton(
+                    tooltip: 'Video call',
+                    icon: const Icon(Icons.videocam, color: AppColors.accent),
+                    onPressed: () => _startCall(context, state, video: true),
+                  ),
+              ],
             ),
             body: Stack(
               children: [

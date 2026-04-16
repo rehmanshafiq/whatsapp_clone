@@ -8,6 +8,7 @@ import '../../data/repository/auth_repository.dart';
 import '../../data/repository/chat_remote_data_source.dart';
 import '../../data/repository/chat_repository.dart';
 import '../../data/services/web_socket_service.dart';
+import '../../data/services/webrtc_call_manager.dart';
 import '../../presentation/bloc/calls/calls_bloc.dart';
 import '../../presentation/cubit/chat_cubit.dart';
 import '../../presentation/cubit/contact_cubit.dart';
@@ -38,6 +39,9 @@ void setupLocator() {
       getIt<WebSocketService>(),
     ),
   );
+  getIt.registerLazySingleton<WebRtcCallManager>(
+    () => WebRtcCallManager(chatRepository: getIt<ChatRepository>()),
+  );
   getIt.registerLazySingleton<AuthRepository>(
     () => AuthRepository(
       getIt<AuthRemoteDataSource>(),
@@ -52,7 +56,9 @@ void setupLocator() {
   getIt.registerLazySingleton<AudioPlaybackService>(
     () => AudioPlaybackService(),
   );
-  getIt.registerFactory<ChatCubit>(() => ChatCubit(getIt<ChatRepository>()));
+  getIt.registerFactory<ChatCubit>(
+    () => ChatCubit(getIt<ChatRepository>(), getIt<WebRtcCallManager>()),
+  );
   getIt.registerFactory<CallsBloc>(() => CallsBloc(getIt<ChatRepository>()));
   getIt.registerFactory<ContactCubit>(
     () => ContactCubit(getIt<ChatRepository>()),

@@ -1,10 +1,12 @@
 import 'package:flutter/foundation.dart';
+import 'package:get_it/get_it.dart';
 
 import '../../core/auth/jwt_utils.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/network/dio_api_client.dart';
 import '../local/storage_service.dart';
 import '../services/web_socket_service.dart';
+import '../services/webrtc_call_manager.dart';
 import 'auth_remote_data_source.dart';
 
 class AuthRepository {
@@ -119,5 +121,8 @@ class AuthRepository {
     await _webSocketService.disconnect();
     _dioApiClient.clearAuthHeader();
     _storageService.clearAll();
+    if (GetIt.I.isRegistered<WebRtcCallManager>()) {
+      GetIt.I<WebRtcCallManager>().clearTurnCredentialsCache();
+    }
   }
 }

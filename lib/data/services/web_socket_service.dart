@@ -84,7 +84,13 @@ class WebSocketService {
   }
 
   void send(dynamic payload) {
-    if (!isConnected || _channel == null) return;
+    if (!isConnected || _channel == null) {
+      final ev = payload is Map ? payload['event'] : null;
+      debugPrint(
+        '[WebSocket] send skipped (not connected) event=$ev status=$_status',
+      );
+      return;
+    }
 
     try {
       if (payload is String) {
@@ -92,7 +98,9 @@ class WebSocketService {
       } else {
         _channel!.sink.add(jsonEncode(payload));
       }
-    } catch (_) {}
+    } catch (e) {
+      debugPrint('[WebSocket] send failed: $e');
+    }
   }
 
   void _onSocketMessage(dynamic message) {
