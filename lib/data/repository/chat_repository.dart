@@ -1253,7 +1253,10 @@ class ChatRepository {
         statusCode: 401,
       );
     }
-    return _remoteDataSource.fetchCallHistory(token: token);
+    return _remoteDataSource.fetchCallHistory(
+      token: token,
+      currentUserId: _storageService.getUserId(),
+    );
   }
 
   /// Fetches presence (online status, last_seen) for the peer user of [channelId].

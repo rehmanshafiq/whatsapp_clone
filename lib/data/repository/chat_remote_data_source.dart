@@ -1424,7 +1424,10 @@ class ChatRemoteDataSource {
 
   /// Returns call history for the authenticated user (most recent first).
   /// GET /api/v1/chat/calls
-  Future<List<CallLog>> fetchCallHistory({required String token}) async {
+  Future<List<CallLog>> fetchCallHistory({
+    required String token,
+    String? currentUserId,
+  }) async {
     try {
       final response = await _dio.get<dynamic>(
         '/api/v1/chat/calls',
@@ -1440,7 +1443,11 @@ class ChatRemoteDataSource {
       final dynamic data = raw is String ? json.decode(raw) : raw;
       if (data == null) return const <CallLog>[];
       final listMaps = _extractCallLogList(data);
-      return listMaps.map(CallLog.fromJson).toList();
+      return listMaps
+          .map(
+            (m) => CallLog.fromJson(m, currentUserId: currentUserId),
+          )
+          .toList();
     } on DioException catch (e) {
       final statusCode = e.response?.statusCode;
       String message = 'Failed to load call history.';

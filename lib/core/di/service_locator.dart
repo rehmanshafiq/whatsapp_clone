@@ -8,6 +8,7 @@ import '../../data/repository/auth_repository.dart';
 import '../../data/repository/chat_remote_data_source.dart';
 import '../../data/repository/chat_repository.dart';
 import '../../data/services/web_socket_service.dart';
+import '../../presentation/bloc/calls/calls_bloc.dart';
 import '../../presentation/cubit/chat_cubit.dart';
 import '../../presentation/cubit/contact_cubit.dart';
 import '../../presentation/cubit/auth_cubit.dart';
@@ -52,6 +53,7 @@ void setupLocator() {
     () => AudioPlaybackService(),
   );
   getIt.registerFactory<ChatCubit>(() => ChatCubit(getIt<ChatRepository>()));
+  getIt.registerFactory<CallsBloc>(() => CallsBloc(getIt<ChatRepository>()));
   getIt.registerFactory<ContactCubit>(
     () => ContactCubit(getIt<ChatRepository>()),
   );

@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
+import '../../core/di/service_locator.dart';
 import '../bloc/bottom_navigation/bottom_navigation_bloc.dart';
 import '../bloc/bottom_navigation/bottom_navigation_event.dart';
 import '../bloc/bottom_navigation/bottom_navigation_state.dart';
+import '../bloc/calls/calls_bloc.dart';
 import 'calls_screen.dart';
 import 'chat_list_screen.dart';
 import 'profile_screen.dart';
@@ -39,7 +41,7 @@ class _MainScreenContent extends StatelessWidget {
             sizing: StackFit.expand,
             children: const [
               ChatListScreen(),
-              CallsScreen(),
+              _CallsTab(),
               ProfileScreen(),
             ],
           ),
@@ -101,6 +103,18 @@ class _MainScreenContent extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+class _CallsTab extends StatelessWidget {
+  const _CallsTab();
+
+  @override
+  Widget build(BuildContext context) {
+    return BlocProvider(
+      create: (_) => getIt<CallsBloc>(),
+      child: const CallsScreen(),
     );
   }
 }
