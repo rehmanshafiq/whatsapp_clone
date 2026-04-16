@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../local/storage_service.dart';
+import '../models/call_log.dart';
 import '../models/chat_channel.dart';
 import '../models/group_details.dart';
 import '../models/group_member.dart';
@@ -1242,6 +1243,17 @@ class ChatRepository {
       );
     }
     return _remoteDataSource.fetchBlockedUsers(token: token);
+  }
+
+  Future<List<CallLog>> fetchCallHistory() async {
+    final token = _storageService.getToken();
+    if (token == null || token.isEmpty) {
+      throw const ApiException(
+        message: 'Your session has expired. Please sign in again.',
+        statusCode: 401,
+      );
+    }
+    return _remoteDataSource.fetchCallHistory(token: token);
   }
 
   /// Fetches presence (online status, last_seen) for the peer user of [channelId].

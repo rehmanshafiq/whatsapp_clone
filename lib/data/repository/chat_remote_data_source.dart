@@ -7,6 +7,7 @@ import 'package:dio/dio.dart';
 import '../../core/constants/app_constants.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/utils/document_attachment_filename.dart';
+import '../models/call_log.dart';
 import '../models/chat_channel.dart';
 import '../models/group_details.dart';
 import '../models/group_member.dart';
@@ -1421,6 +1422,43 @@ class ChatRemoteDataSource {
     }
   }
 
+  /// Returns call history for the authenticated user (most recent first).
+  /// GET /api/v1/chat/calls
+  Future<List<CallLog>> fetchCallHistory({required String token}) async {
+    try {
+      final response = await _dio.get<dynamic>(
+        '/api/v1/chat/calls',
+        options: Options(
+          headers: <String, String>{
+            'authorization': 'Bearer $token',
+            'x-api-key': _apiKey,
+          },
+        ),
+      );
+
+      final dynamic raw = response.data;
+      final dynamic data = raw is String ? json.decode(raw) : raw;
+      if (data == null) return const <CallLog>[];
+      final listMaps = _extractCallLogList(data);
+      return listMaps.map(CallLog.fromJson).toList();
+    } on DioException catch (e) {
+      final statusCode = e.response?.statusCode;
+      String message = 'Failed to load call history.';
+      if (statusCode == 401) {
+        message = 'Session expired. Please sign in again.';
+      } else if (e.type == DioExceptionType.connectionTimeout ||
+          e.type == DioExceptionType.connectionError ||
+          e.type == DioExceptionType.receiveTimeout) {
+        message = 'Network error. Please check your connection and retry.';
+      }
+      throw ApiException(message: message, statusCode: statusCode);
+    } on ApiException {
+      rethrow;
+    } catch (e) {
+      throw ApiException(message: e.toString());
+    }
+  }
+
   Future<List<User>> fetchContacts() async {
     try {
       await Future.delayed(const Duration(milliseconds: 600));
@@ -1445,6 +1483,24 @@ class ChatRemoteDataSource {
     }
     throw const ApiException(
       message: 'Invalid conversations response from server.',
+      statusCode: 500,
+    );
+  }
+
+  /// Backend may return a raw list or `{ "call_logs": [...] }`.
+  List<Map<String, dynamic>> _extractCallLogList(dynamic data) {
+    if (data is List) {
+      return data.whereType<Map<String, dynamic>>().toList();
+    }
+    if (data is Map<String, dynamic>) {
+      final list =
+          data['call_logs'] ?? data['calls'] ?? data['data'] ?? data['items'];
+      if (list is List) {
+        return list.whereType<Map<String, dynamic>>().toList();
+      }
+    }
+    throw const ApiException(
+      message: 'Invalid call history response from server.',
       statusCode: 500,
     );
   }
