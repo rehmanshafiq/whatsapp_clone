@@ -1866,8 +1866,7 @@ class ChatRepository {
 
   /// Starts a voice or video call with a 1:1 peer.
   ///
-  /// [conversationId] is included when non-empty so the backend can route the
-  /// same way as [send_message] (required by some servers for `incoming_call`).
+  /// Payload matches API docs exactly: only `peer_user_id` and `call_type`.
   Future<bool> sendCallInitiate({
     required String peerUserId,
     required String callType,
@@ -1884,18 +1883,11 @@ class ChatRepository {
     final normalized = callType.toLowerCase();
     final type = normalized == 'video' ? 'video' : 'voice';
 
-    // Snake_case matches API docs; camelCase mirrors help some web clients / gateways.
+    // Match API docs exactly: only peer_user_id and call_type.
     final data = <String, dynamic>{
       'peer_user_id': peerUserId,
       'call_type': type,
-      'peerUserId': peerUserId,
-      'callType': type,
     };
-    final trimmedConv = conversationId?.trim() ?? '';
-    if (trimmedConv.isNotEmpty) {
-      data['conversation_id'] = trimmedConv;
-      data['conversationId'] = trimmedConv;
-    }
 
     final envelope = <String, dynamic>{
       'event': 'call_initiate',
@@ -1905,20 +1897,41 @@ class ChatRepository {
 
     _webSocketService.send(envelope);
     debugPrint(
-      '[ChatRepository] call_initiate → callee must match logged-in user on web. '
-      'peer_user_id=$peerUserId conv=$trimmedConv type=$type',
+      '[ChatRepository] call_initiate → '
+      'peer_user_id=$peerUserId type=$type',
     );
     return true;
   }
 
-  void sendCallAnswer({required String callId}) {
-    if (!_webSocketService.isConnected) return;
+  /// Returns false if the answer could not be sent (no socket after reconnect).
+  ///
+  /// Payload matches API docs exactly: only `call_id`.
+  Future<bool> sendCallAnswer({
+    required String callId,
+    String? remotePeerUserId,
+  }) async {
+    await ensureRealtimeSocketConnected();
+    if (!_webSocketService.isConnected) {
+      debugPrint(
+        '[ChatRepository] sendCallAnswer: socket not connected, answer not sent',
+      );
+      return false;
+    }
+
+    // Match API docs exactly: only call_id.
+    final data = <String, dynamic>{
+      'call_id': callId,
+    };
 
     _webSocketService.send(<String, dynamic>{
       'event': 'call_answer',
-      'data': <String, dynamic>{'call_id': callId},
+      'data': data,
       'timestamp': DateTime.now().millisecondsSinceEpoch,
     });
+    debugPrint(
+      '[ChatRepository] call_answer → call_id=$callId',
+    );
+    return true;
   }
 
   /// [reason]: `rejected`, `busy`, or `timeout`.

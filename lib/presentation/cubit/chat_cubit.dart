@@ -639,11 +639,11 @@ class ChatCubit extends Cubit<ChatState> {
     _refreshChannelList();
   }
 
-  bool _handleCallSignalingEvent(
-    String? eventType,
-    Map<String, dynamic> raw,
-  ) {
-    const signaling = <String>{
+  /// Voice/WebRTC events are consumed by [WebRtcCallManager] on the socket stream.
+  static bool _isCallSignalingEventForCallManager(String? eventType) {
+    if (eventType == null) return false;
+    final t = eventType.trim().toLowerCase();
+    const handled = <String>{
       'incoming_call',
       'call_answered',
       'call_rejected',
@@ -655,50 +655,16 @@ class ChatCubit extends Cubit<ChatState> {
       'call_outgoing',
       'outgoing_call',
       'call_progress',
+      'rtc_offer',
+      'sdp_offer',
+      'webrtcoffer',
+      'rtc_answer',
+      'sdp_answer',
+      'icecandidate',
+      'new_ice_candidate',
+      'ice-candidate',
     };
-    if (eventType == null || !signaling.contains(eventType)) return false;
-
-    final data = raw['data'];
-    final Map<String, dynamic>? map = data is Map<String, dynamic>
-        ? data
-        : data is Map
-        ? Map<String, dynamic>.from(data)
-        : null;
-    if (map == null) return true;
-
-    switch (eventType) {
-      case 'incoming_call':
-        unawaited(_callManager.onIncomingCall(map));
-        break;
-      case 'call_answered':
-        unawaited(_callManager.onCallAnswered(map));
-        break;
-      case 'call_rejected':
-        _callManager.onCallRejected(map);
-        break;
-      case 'call_ended':
-        _callManager.onCallEnded(map);
-        break;
-      case 'webrtc_offer':
-        unawaited(_callManager.onWebRtcOffer(map));
-        break;
-      case 'webrtc_answer':
-        unawaited(_callManager.onWebRtcAnswer(map));
-        break;
-      case 'ice_candidate':
-        unawaited(_callManager.onRemoteIceCandidate(map));
-        break;
-      case 'call_ringing':
-      case 'call_outgoing':
-      case 'outgoing_call':
-      case 'call_progress':
-        final id = _stringFrom(map['call_id']);
-        if (id != null) _callManager.noteOutgoingCallId(id);
-        break;
-      default:
-        break;
-    }
-    return true;
+    return handled.contains(t);
   }
 
   void _handleGroupUpdated(Map<String, dynamic> raw) {
@@ -743,7 +709,7 @@ class ChatCubit extends Cubit<ChatState> {
     // Backend uses event-based format: {"event":"ping|pong|send_message|...","data":{...}}
     final eventType = _stringFrom(raw['event']);
     if (eventType == 'ping' || eventType == 'pong') return;
-    if (_handleCallSignalingEvent(eventType, raw)) return;
+    if (_isCallSignalingEventForCallManager(eventType)) return;
     if (eventType == 'group_updated') {
       _handleGroupUpdated(raw);
       return;
@@ -1426,18 +1392,36 @@ class ChatCubit extends Cubit<ChatState> {
         : raw;
     final messageId = _stringFrom(data['message_id']);
     final conversationId = _stringFrom(data['conversation_id']);
-    final userIdRaw = _stringFrom(data['user_id']);
     final emoji = _stringFrom(data['emoji']) ?? '';
-    if (messageId == null || conversationId == null || userIdRaw == null)
-      return;
-    final userId = _normalizeReactionUserId(userIdRaw);
+    if (messageId == null || conversationId == null) return;
 
-    _applyReactionUpdate(
-      messageId: messageId,
-      conversationId: conversationId,
-      userId: userId,
-      emoji: emoji,
-    );
+    // Handle both singular user_id and plural user_ids array.
+    final userIdsRaw = data['user_ids'] ?? data['userIds'];
+    if (userIdsRaw is List && userIdsRaw.isNotEmpty) {
+      // Bulk reaction update (one emoji, multiple users)
+      for (final uid in userIdsRaw) {
+        final userIdRaw = _stringFrom(uid);
+        if (userIdRaw == null) continue;
+        final userId = _normalizeReactionUserId(userIdRaw);
+        _applyReactionUpdate(
+          messageId: messageId,
+          conversationId: conversationId,
+          userId: userId,
+          emoji: emoji,
+        );
+      }
+    } else {
+      // Singular user_id (original format)
+      final userIdRaw = _stringFrom(data['user_id']);
+      if (userIdRaw == null) return;
+      final userId = _normalizeReactionUserId(userIdRaw);
+      _applyReactionUpdate(
+        messageId: messageId,
+        conversationId: conversationId,
+        userId: userId,
+        emoji: emoji,
+      );
+    }
   }
 
   void _handleMessageDeleted(Map<String, dynamic> raw) {

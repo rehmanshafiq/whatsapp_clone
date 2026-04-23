@@ -17,6 +17,8 @@ Future<void> main() async {
   await dotenv.load(fileName: '.env');
   await GetStorage.init();
   setupLocator();
+  // Subscribe to call/WebRTC socket events before UI builds (lazy singleton).
+  getIt<WebRtcCallManager>();
   await getIt<AuthRepository>().initializeSession();
   runApp(const WhatsAppClone());
 }
