@@ -8,6 +8,7 @@ import 'core/root_scaffold_messenger.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
 import 'data/repository/auth_repository.dart';
+import 'data/repository/chat_repository.dart';
 import 'data/services/webrtc_call_manager.dart';
 import 'presentation/cubit/chat_cubit.dart';
 import 'presentation/widgets/active_call_overlay.dart';
@@ -51,6 +52,13 @@ class _WhatsAppCloneState extends State<WhatsAppClone>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _authRepository.validateOrLogoutExpiredSession();
+      // Android/iOS commonly drop the WebSocket while the app is backgrounded.
+      // Without this, an authenticated user who resumes the app has no live
+      // socket and cannot receive `incoming_call`, so the peer's phone never
+      // rings. Reconnect eagerly on resume.
+      if (_authRepository.isAuthenticated) {
+        getIt<ChatRepository>().ensureRealtimeSocketConnected();
+      }
     }
   }
 

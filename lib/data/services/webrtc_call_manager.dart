@@ -107,17 +107,34 @@ class WebRtcCallManager extends ChangeNotifier {
 
   static String _canonicalSignalingEvent(String type) {
     switch (type) {
+      case 'call_incoming':
+      case 'incomingcall':
+        return 'incoming_call';
       case 'rtc_offer':
       case 'sdp_offer':
       case 'webrtcoffer':
+      case 'offer':
         return 'webrtc_offer';
       case 'rtc_answer':
       case 'sdp_answer':
+      case 'answer':
         return 'webrtc_answer';
       case 'icecandidate':
       case 'new_ice_candidate':
       case 'ice-candidate':
         return 'ice_candidate';
+      case 'call_answer':
+      case 'call_accepted':
+      case 'call_accept':
+        return 'call_answered';
+      case 'call_declined':
+      case 'call_decline':
+        return 'call_rejected';
+      case 'end_call':
+      case 'call_hangup':
+        return 'call_ended';
+      case 'ringing':
+        return 'call_ringing';
       default:
         return type;
     }
@@ -163,42 +180,41 @@ class WebRtcCallManager extends ChangeNotifier {
     if (!signaling.contains(type)) return;
 
     final data = raw['data'];
-    final Map<String, dynamic>? map = data is Map<String, dynamic>
+    final Map<String, dynamic>? nestedData = data is Map<String, dynamic>
         ? data
         : data is Map
         ? Map<String, dynamic>.from(data)
         : null;
+    final Map<String, dynamic> map = nestedData ?? raw;
 
     switch (type) {
       case 'incoming_call':
-        if (map != null) unawaited(onIncomingCall(map));
+        unawaited(onIncomingCall(map));
         break;
       case 'call_answered':
-        if (map != null) unawaited(onCallAnswered(map));
+        unawaited(onCallAnswered(map));
         break;
       case 'call_rejected':
-        if (map != null) onCallRejected(map);
+        onCallRejected(map);
         break;
       case 'call_ended':
-        if (map != null) onCallEnded(map);
+        onCallEnded(map);
         break;
       case 'webrtc_offer':
-        if (map != null) {
-          debugPrint('[WebRtcCallManager] webrtc_offer received');
-          unawaited(onWebRtcOffer(map));
-        }
+        debugPrint('[WebRtcCallManager] webrtc_offer received');
+        unawaited(onWebRtcOffer(map));
         break;
       case 'webrtc_answer':
-        if (map != null) unawaited(onWebRtcAnswer(map));
+        unawaited(onWebRtcAnswer(map));
         break;
       case 'ice_candidate':
-        if (map != null) unawaited(onRemoteIceCandidate(map));
+        unawaited(onRemoteIceCandidate(map));
         break;
       case 'call_ringing':
       case 'call_outgoing':
       case 'outgoing_call':
       case 'call_progress':
-        final id = map != null ? _string(map['call_id']) : null;
+        final id = _string(map['call_id']) ?? _string(map['callId']);
         if (id != null) noteOutgoingCallId(id);
         break;
     }

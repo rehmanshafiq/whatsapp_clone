@@ -38,6 +38,18 @@ class AuthRepository {
       final token = _storageService.getToken();
       if (token != null && token.isNotEmpty) {
         _dioApiClient.setAuthHeader(token);
+        // Connect the realtime socket immediately on app start so this user
+        // can receive `incoming_call` / push events even before they open the
+        // chats list. Without this, a user who cold-starts the app with a
+        // saved session has no WS connection and the server has nowhere to
+        // deliver incoming-call signaling.
+        try {
+          await _webSocketService.connect(token: token);
+        } catch (e) {
+          debugPrint(
+            '[AuthRepository] initializeSession: WS connect failed: $e',
+          );
+        }
       }
     }
     _authState.value = wasValid;
