@@ -12,6 +12,8 @@ enum CallSessionPhase { idle, ringingOut, ringingIn, connecting, connected }
 
 enum _CallRole { caller, callee }
 
+enum CallNetworkQuality { unknown, good, fair, poor }
+
 /// WebRTC + signaling for 1:1 voice/video.
 ///
 /// FIX SUMMARY (vs previous version):
@@ -50,6 +52,9 @@ class WebRtcCallManager extends ChangeNotifier {
   String? _peerAvatarUrl;
   bool _isVideo = false;
   bool _micEnabled = true;
+  bool _isVideoEnabled = true;
+
+  CallNetworkQuality _networkQuality = CallNetworkQuality.unknown;
 
   RTCPeerConnection? _pc;
   MediaStream? _localStream;
@@ -80,7 +85,9 @@ class WebRtcCallManager extends ChangeNotifier {
   String? get peerAvatarUrl => _peerAvatarUrl;
   bool get isVideo => _isVideo;
   bool get isMicEnabled => _micEnabled;
+  bool get isVideoEnabled => _isVideoEnabled;
   bool get isCaller => _role == _CallRole.caller;
+  CallNetworkQuality get networkQuality => _networkQuality;
   MediaStream? get localStream => _localStream;
   MediaStream? get remoteStream => _remoteStream;
   Duration get connectedDuration {
@@ -263,12 +270,15 @@ class WebRtcCallManager extends ChangeNotifier {
       _pendingIceServers = servers;
       await _openLocalMedia();
 
+      _callId = 'call_${AppConstants.currentUserId}_${DateTime.now().millisecondsSinceEpoch}';
+
       debugPrint('[WebRtcCallManager] media open, sending call_initiate');
 
       final sent = await _repo.sendCallInitiate(
         peerUserId: peerUserId,
         callType: isVideo ? 'video' : 'voice',
         conversationId: conversationId,
+        callId: _callId,
       );
       if (!sent) {
         _toast('No connection. Open Chats to reconnect, then try again.');
@@ -297,19 +307,28 @@ class WebRtcCallManager extends ChangeNotifier {
       return;
     }
 
-    final callId = _string(data['call_id']) ?? _string(data['callId']);
+    var callId = _string(data['call_id']) ?? _string(data['callId']) ?? _string(data['id']) ?? _string(data['room_id']);
     final callerId =
         _string(data['caller_id']) ??
             _string(data['callerId']) ??
             _string(data['peer_user_id']) ??
-            _string(data['peerUserId']);
-    if (callId == null || callerId == null) {
+            _string(data['peerUserId']) ??
+            _string(data['from_user_id']) ??
+            _string(data['fromUserId']);
+            
+    if (callerId == null) {
       debugPrint(
-        '[WebRtcCallManager] incoming_call missing call_id or caller_id, '
-            'keys=${data.keys.toList()}',
+        '[WebRtcCallManager] incoming_call missing caller_id, keys=${data.keys.toList()}',
       );
       return;
     }
+    
+    if (callId == null) {
+      // Synthesize if totally missing so callee doesn't drop the call silently.
+      callId = 'call_${callerId}_${DateTime.now().millisecondsSinceEpoch}';
+      debugPrint('[WebRtcCallManager] incoming_call missing call_id, synthesized $callId');
+    }
+    
     debugPrint(
       '[WebRtcCallManager] incoming call from $callerId callId=$callId',
     );
@@ -593,6 +612,26 @@ class WebRtcCallManager extends ChangeNotifier {
     notifyListeners();
   }
 
+  void toggleCamera() {
+    final tracks = _localStream?.getVideoTracks() ?? <MediaStreamTrack>[];
+    final video = tracks.isEmpty ? null : tracks.first;
+    if (video == null) return;
+    _isVideoEnabled = !_isVideoEnabled;
+    video.enabled = _isVideoEnabled;
+    notifyListeners();
+  }
+
+  Future<void> switchCamera() async {
+    final tracks = _localStream?.getVideoTracks() ?? <MediaStreamTrack>[];
+    final video = tracks.isEmpty ? null : tracks.first;
+    if (video == null) return;
+    try {
+      await Helper.switchCamera(video);
+    } catch (e) {
+      debugPrint('[WebRtcCallManager] switchCamera failed: $e');
+    }
+  }
+
   // ── Internal helpers ───────────────────────────────────────────────────────
 
   bool _signalingPeerMatches(String? peerField) {
@@ -790,7 +829,20 @@ class WebRtcCallManager extends ChangeNotifier {
       }
           : false,
     };
-    _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    try {
+      _localStream = await navigator.mediaDevices.getUserMedia(constraints);
+    } catch (e) {
+      final errorStr = e.toString().toLowerCase();
+      if (errorStr.contains('notallowederror') || 
+          errorStr.contains('permissiondeniederror') || 
+          errorStr.contains('denied')) {
+        _toast('Camera/Microphone permission denied. Please allow them to make calls.');
+      } else {
+        _toast('Could not open camera/microphone.');
+      }
+      debugPrint('[WebRtcCallManager] getUserMedia failed: $e');
+      rethrow;
+    }
   }
 
   Future<void> _createPeerConnection(
@@ -833,10 +885,10 @@ class WebRtcCallManager extends ChangeNotifier {
       if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
         _markSessionConnectedIfNeeded();
       } else if (state ==
-          RTCPeerConnectionState.RTCPeerConnectionStateFailed) {
-        debugPrint('[WebRtcCallManager] PC FAILED – cleaning up');
-        _toast('Call connection failed');
-        unawaited(hangUp());
+          RTCPeerConnectionState.RTCPeerConnectionStateFailed || 
+          state == RTCPeerConnectionState.RTCPeerConnectionStateDisconnected) {
+        debugPrint('[WebRtcCallManager] PC FAILED/DISCONNECTED – attempting ICE restart');
+        unawaited(_restartIce());
       } else if (state ==
           RTCPeerConnectionState.RTCPeerConnectionStateClosed) {
         debugPrint('[WebRtcCallManager] PC CLOSED');
@@ -885,6 +937,22 @@ class WebRtcCallManager extends ChangeNotifier {
     }
   }
 
+  Future<void> _restartIce() async {
+    final pc = _pc;
+    if (pc == null || _peerUserId == null) return;
+    try {
+      await pc.restartIce();
+      final offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+      _repo.sendWebRtcOffer(
+        peerUserId: _peerUserId!,
+        sdp: offer.sdp ?? '',
+      );
+    } catch (e) {
+      debugPrint('[WebRtcCallManager] ICE restart failed: $e');
+    }
+  }
+
   RTCIceCandidate? _mapToIceCandidate(Map<String, dynamic> m) {
     final cand = m['candidate']?.toString();
     if (cand == null || cand.isEmpty) return null;
@@ -901,11 +969,50 @@ class WebRtcCallManager extends ChangeNotifier {
 
   void _startDurationTicker() {
     _durationTicker?.cancel();
-    _durationTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+    _durationTicker = Timer.periodic(const Duration(seconds: 1), (_) async {
       if (_phase == CallSessionPhase.connected) {
+        await _updateNetworkQuality();
         notifyListeners();
       }
     });
+  }
+
+  Future<void> _updateNetworkQuality() async {
+    final pc = _pc;
+    if (pc == null) return;
+    try {
+      final stats = await pc.getStats();
+      double fractionLost = 0.0;
+      double rtt = 0.0;
+      bool hasStats = false;
+
+      for (final report in stats) {
+        if (report.type == 'inbound-rtp') {
+          final lost = (report.values['packetsLost'] as num?)?.toDouble() ?? 0.0;
+          final total = (report.values['packetsReceived'] as num?)?.toDouble() ?? 0.0;
+          if (total > 0) {
+            fractionLost = lost / total;
+            hasStats = true;
+          }
+        }
+        if (report.type == 'candidate-pair' && report.values['state'] == 'succeeded') {
+          rtt = (report.values['currentRoundTripTime'] as num?)?.toDouble() ?? 0.0;
+          hasStats = true;
+        }
+      }
+
+      if (!hasStats) return;
+
+      if (fractionLost > 0.05 || rtt > 0.5) {
+        _networkQuality = CallNetworkQuality.poor;
+      } else if (fractionLost > 0.02 || rtt > 0.2) {
+        _networkQuality = CallNetworkQuality.fair;
+      } else {
+        _networkQuality = CallNetworkQuality.good;
+      }
+    } catch (e) {
+      debugPrint('[WebRtcCallManager] stats error: $e');
+    }
   }
 
   // ── State reset + cleanup ──────────────────────────────────────────────────

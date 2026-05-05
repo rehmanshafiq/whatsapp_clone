@@ -1871,6 +1871,7 @@ class ChatRepository {
     required String peerUserId,
     required String callType,
     String? conversationId,
+    String? callId,
   }) async {
     await ensureRealtimeSocketConnected();
     if (!_webSocketService.isConnected) {
@@ -1888,6 +1889,10 @@ class ChatRepository {
       'peer_user_id': peerUserId,
       'call_type': type,
     };
+    
+    if (callId != null) {
+      data['call_id'] = callId;
+    }
 
     final envelope = <String, dynamic>{
       'event': 'call_initiate',
